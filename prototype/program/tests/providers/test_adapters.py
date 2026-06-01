@@ -17,7 +17,8 @@ def test_anthropic_provider_is_provider():
     assert isinstance(AnthropicProvider(), Provider)
 
 
-def test_nim_provider_is_provider():
+def test_nim_provider_is_provider(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
     assert isinstance(NIMProvider(), Provider)
 
 
@@ -26,7 +27,8 @@ def test_get_provider_anthropic():
     assert isinstance(provider, AnthropicProvider)
 
 
-def test_get_provider_nim():
+def test_get_provider_nim(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
     provider = get_provider("nim")
     assert isinstance(provider, NIMProvider)
 

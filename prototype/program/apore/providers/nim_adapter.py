@@ -7,13 +7,18 @@ from openai import OpenAI
 from apore.providers.base import Provider
 
 DEFAULT_MODEL = "meta/llama-3.1-8b-instruct"
-_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 
 class NIMProvider(Provider):
     """Calls NVIDIA NIM via the OpenAI-compatible endpoint. Reads NVIDIA_API_KEY from env."""
 
-    _BASE_URL = _BASE_URL
+    _BASE_URL = "https://integrate.api.nvidia.com/v1"
+
+    def __init__(self) -> None:
+        api_key = os.environ.get("NVIDIA_API_KEY")
+        if not api_key:
+            raise ValueError("NVIDIA_API_KEY environment variable is not set")
+        self._client = OpenAI(base_url=self._BASE_URL, api_key=api_key)
 
     def invoke(
         self,
@@ -22,12 +27,8 @@ class NIMProvider(Provider):
         model: str,
         config: dict,
     ) -> str:
-        client = OpenAI(
-            base_url=self._BASE_URL,
-            api_key=os.environ["NVIDIA_API_KEY"],
-        )
         all_messages = [{"role": "system", "content": system_prompt}] + messages
-        response = client.chat.completions.create(
+        response = self._client.chat.completions.create(
             model=model,
             messages=all_messages,
             max_tokens=config.get("max_tokens", 1024),

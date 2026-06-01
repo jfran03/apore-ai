@@ -10,6 +10,9 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 class AnthropicProvider(Provider):
     """Calls Anthropic Messages API. Reads ANTHROPIC_API_KEY from env."""
 
+    def __init__(self) -> None:
+        self._client = anthropic.Anthropic()
+
     def invoke(
         self,
         system_prompt: str,
@@ -17,8 +20,7 @@ class AnthropicProvider(Provider):
         model: str,
         config: dict,
     ) -> str:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
+        response = self._client.messages.create(
             model=model,
             max_tokens=config.get("max_tokens", 1024),
             system=system_prompt,

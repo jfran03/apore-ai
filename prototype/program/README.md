@@ -66,8 +66,32 @@ cd program
 python scripts/fetch_fixture.py
 ```
 
+## Desktop app (Tauri)
+
+The prototype deliverable is a packaged desktop binary. The `client/` directory includes a full Tauri v2 config under `client/src-tauri/`.
+
+**Prerequisites (install once):**
+- Rust: https://rustup.rs — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` (or `winget install Rustlang.Rustup` on Windows)
+- WebView2 — already bundled on Windows 10/11 (April 2021+). No install needed.
+
+**Build the desktop binary:**
+```bash
+cd program/client
+npm install
+npm run tauri:build
+# Installer output: client/src-tauri/target/release/bundle/
+```
+
+**Desktop dev mode (two terminals):**
+```
+Terminal 1: cd program && uvicorn apore.api.app:app --reload --port 8000
+Terminal 2: cd program/client && npm run tauri:dev
+```
+
+See `client/README.md` for full Tauri build docs and the configurable API base URL.
+
 ## Notes
 
-The client is a portable React/TS hub. The **prototype deliverable is a desktop app (Tauri)**; the same codebase also builds the web app and wraps to mobile (Capacitor, iOS + Android) without a rewrite. The runtime never moves to the client — every target is a thin client over `apore/api`. Visual design follows [`../DESIGN.md`](../DESIGN.md). UI work uses the `impeccable` skill; motion uses `emil-design-eng`.
+The client is a portable React/TS hub. The same codebase builds the web app (`npm run build`) and the desktop app (`npm run tauri:build`). Mobile via Capacitor is viable from the same codebase and deferred to Phase 3. The runtime never moves to the client — every target is a thin client over `apore/api`. Visual design follows [`../DESIGN.md`](../DESIGN.md).
 
 Paths in code should treat `program/` as `PROGRAM_ROOT` unless explicitly configured otherwise.

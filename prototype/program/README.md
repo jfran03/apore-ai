@@ -18,18 +18,55 @@ Everything in this directory is part of the **runnable** Phase 2 prototype. The 
 - Research docs (`PRD.md`, `DESIGN.md`) — stay at prototype root
 - `.cursor/`, `.agents/`, `docs/superpowers/` — dev tooling only
 
-## Running
+## Running the prototype
 
-From this directory (once implemented):
+Requires Python 3.11+, Node 18+.
+
+### Install Python deps
 
 ```bash
 cd program
-# Terminal 1: API + runtime
-# uvicorn apore.api.app:app --reload
-
-# Terminal 2: polished UI (portable hub)
-# cd client && npm run dev
+pip install -e ".[dev]"
 ```
+
+### Install client deps
+
+```bash
+cd program/client
+npm install
+```
+
+### Terminal 1 — API server
+
+```bash
+cd program
+uvicorn apore.api.app:app --reload --port 8000
+```
+
+### Terminal 2 — Client dev server
+
+```bash
+cd program/client
+npm run dev
+```
+
+Open http://localhost:5173 in your browser.
+
+### Run Python tests
+
+```bash
+cd program
+python -m pytest tests -q
+```
+
+### Fetch the test fixture (optional — needed for real grounding)
+
+```bash
+cd program
+python scripts/fetch_fixture.py
+```
+
+## Notes
 
 The client is a portable React/TS hub. The **prototype deliverable is a desktop app (Tauri)**; the same codebase also builds the web app and wraps to mobile (Capacitor, iOS + Android) without a rewrite. The runtime never moves to the client — every target is a thin client over `apore/api`. Visual design follows [`../DESIGN.md`](../DESIGN.md). UI work uses the `impeccable` skill; motion uses `emil-design-eng`.
 

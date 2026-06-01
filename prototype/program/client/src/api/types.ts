@@ -13,6 +13,8 @@ export interface CreateSessionResponse {
 export interface TurnRequest {
   learner_response: string;
   concept_id: string;
+  explicit_rating?: string;
+  correct?: string;
 }
 
 export interface TurnResponse {

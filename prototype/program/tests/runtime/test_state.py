@@ -70,6 +70,20 @@ def test_write_scalar_multiple_times(tmp_path: Path):
     assert read_scalar(p) == pytest.approx(0.8)
 
 
+def test_write_scalar_clamps_low(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    initialize(p)
+    write_scalar(p, 0.0)
+    assert read_scalar(p) == pytest.approx(0.1)
+
+
+def test_write_scalar_clamps_high(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    initialize(p)
+    write_scalar(p, 1.0)
+    assert read_scalar(p) == pytest.approx(0.9)
+
+
 # ---------------------------------------------------------------------------
 # mastery round-trip
 # ---------------------------------------------------------------------------

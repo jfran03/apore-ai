@@ -56,7 +56,8 @@ def read_scalar(path: Path) -> float:
 
 
 def write_scalar(path: Path, value: float) -> None:
-    """Replace the float under `## Scalar` in-place."""
+    """Replace the float under `## Scalar` in-place, clamped to [0.1, 0.9]."""
+    value = max(0.1, min(0.9, value))
     text = _read_text(path)
     updated = re.sub(
         r"(## Scalar\s*\n)\s*[0-9.eE+\-]+",

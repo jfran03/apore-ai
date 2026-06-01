@@ -85,3 +85,15 @@ With inconsistency flag (only when triggered):
   `alpha` or weight values. Those are runtime-only.
 - If the transcript is empty or malformed, emit:
   `{"explicit_rating": "ok", "correct": "no", "hint_count": 0, "turn_count": 0, "hedging_count": 0}`
+
+---
+
+## Note for context assembly
+
+**Column mapping:** The runtime maps the JSON field names to question log
+columns as follows: `hint_count` → `hints`, `turn_count` → `turns`,
+`hedging_count` → `hedging`. Emit the JSON field names exactly as specified
+above; the runtime handles the rename on write.
+
+**Descoped signals:** `response_length` and `learner_question_asking`
+(FR-4.1) are deferred to Phase 3. Do not attempt to extract or emit them.

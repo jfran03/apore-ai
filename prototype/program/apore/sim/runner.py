@@ -6,12 +6,14 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import json
+
 from apore.providers.stub import StubProvider
 from apore.providers import get_provider
 from apore.providers.base import Provider
 from apore.runtime import state as state_mod
 from apore.runtime.core import run_question_cycle
-from apore.runtime.paths import get_program_root
+from apore.sim.convergence import write_artifacts
 from apore.sim.student import SimulatedStudent, StudentProfile
 
 
@@ -113,6 +115,21 @@ def run_sessions(
                     "session_number": session_idx,
                     "difficulties": difficulties,
                 }
+            )
+
+        if output_dir is not None:
+            # Load fixture commit from manifest
+            manifest_path = Path(__file__).parent.parent / "fixtures" / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            fixture_commit = manifest["fixtures"].get(fixture_name, {}).get("commit", fixture_name)
+
+            write_artifacts(
+                sessions=trajectories,
+                profile=student.profile,
+                output_dir=output_dir,
+                fixture_commit=fixture_commit,
+                provider=provider_name,
+                model=model,
             )
 
     return trajectories

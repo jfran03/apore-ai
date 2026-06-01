@@ -11,6 +11,8 @@ from apore.sim.student import StudentProfile
 
 def compute_session_error(trajectory: list[float], target_ability: float) -> float:
     """Mean absolute error between trajectory scalars and target_ability."""
+    if not trajectory:
+        return 0.0
     return sum(abs(d - target_ability) for d in trajectory) / len(trajectory)
 
 

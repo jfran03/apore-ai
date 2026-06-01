@@ -28,8 +28,7 @@ class StubProvider(Provider):
     combined system+messages content, return signals JSON; otherwise return a
     question block.
 
-    Optional config key ``seed`` is accepted but currently unused (reserved for
-    future response variation).
+    Optional config key ``seed`` is accepted but currently unused. ``seed`` key in config is currently ignored.
     """
 
     def invoke(

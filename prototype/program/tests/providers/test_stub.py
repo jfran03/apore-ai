@@ -35,7 +35,7 @@ def test_stub_generate_mode():
     # Should not be parseable as JSON
     with pytest.raises((json.JSONDecodeError, ValueError)):
         json.loads(result)
-    assert "?" in result  # contains a question
+    assert "CONCEPT:" in result
 
 
 def test_stub_extract_mode():

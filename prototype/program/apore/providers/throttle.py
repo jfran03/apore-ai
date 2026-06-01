@@ -14,7 +14,7 @@ class Throttle:
         if rpm <= 0:
             raise ValueError("rpm must be positive")
         self._min_interval = 60.0 / rpm
-        self._last_call: float = 0.0
+        self._last_call: float = 0.0  # 0.0 allows the first call through immediately
 
     def wait(self) -> None:
         """Block if necessary to respect the RPM limit."""

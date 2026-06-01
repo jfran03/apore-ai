@@ -152,3 +152,25 @@ def test_invalid_protocol_raises_value_error(tmp_path: Path):
     root, wiki, state = _make_fixture(tmp_path)
     with pytest.raises(ValueError, match="Unknown protocol"):
         assemble_prompt("unknown-protocol", [wiki], state, program_root=root)
+
+
+# ---------------------------------------------------------------------------
+# Error handling and edge cases
+# ---------------------------------------------------------------------------
+
+def test_bad_grounding_file_raises_runtime_error(tmp_path: Path):
+    """Test that passing a non-existent file in grounding_paths raises RuntimeError."""
+    root, _, state = _make_fixture(tmp_path)
+    nonexistent_file = tmp_path / "nonexistent.html"
+    with pytest.raises(RuntimeError, match="Failed to convert grounding file"):
+        assemble_prompt("generate-question", [nonexistent_file], state, program_root=root)
+
+
+def test_empty_grounding_section_has_no_content(tmp_path: Path):
+    """Test that empty grounding_paths results in empty content between headers."""
+    root, _, state = _make_fixture(tmp_path)
+    result = assemble_prompt("generate-question", [], state, program_root=root)
+    content = result["messages"][0]["content"]
+    # With empty grounding, the grounding_text is empty string
+    # We should see the pattern: "## Grounding Context\n\n" followed immediately by "\n\n## Learner State"
+    assert "## Grounding Context\n\n\n\n## Learner State" in content

@@ -34,15 +34,18 @@ def assemble_prompt(
 
     grounding_parts: list[str] = []
     for p in grounding_paths:
-        grounding_parts.append(_markitdown.convert(str(p)).text_content)
+        try:
+            grounding_parts.append(_markitdown.convert(str(p)).text_content)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to convert grounding file {p}: {exc}") from exc
     grounding_text = "\n\n".join(grounding_parts)
 
     learner_state_text = learner_state_path.read_text(encoding="utf-8")
 
     user_content = (
-        f"## Protocol\n{protocol_text}\n\n"
-        f"## Grounding Context\n{grounding_text}\n\n"
-        f"## Learner State\n{learner_state_text}"
+        f"## Protocol\n\n{protocol_text}\n\n"
+        f"## Grounding Context\n\n{grounding_text}\n\n"
+        f"## Learner State\n\n{learner_state_text}"
     )
 
     return {

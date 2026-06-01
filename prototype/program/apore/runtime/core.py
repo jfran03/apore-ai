@@ -72,7 +72,7 @@ def _parse_question_block(response: str) -> tuple[str, str, float, str]:
 
 def _parse_signals(response: str) -> dict:
     """Extract JSON object from the extract-signals response."""
-    match = re.search(r"\{.*\}", response, re.DOTALL)
+    match = re.search(r"\{.*?\}", response, re.DOTALL)
     if not match:
         raise ValueError(f"No JSON object found in extract-signals response: {response!r}")
     return json.loads(match.group())
@@ -101,13 +101,7 @@ def run_question_cycle(
     )
     concept, question_type, intended_difficulty, question_text = _parse_question_block(gen_response)
 
-    # 2. Build dialogue transcript for extract-signals
-    transcript_messages = gen_prompt["messages"] + [
-        {"role": "assistant", "content": gen_response},
-        {"role": "user", "content": learner_response},
-    ]
-
-    # 3. Extract signals
+    # 2. Extract signals
     extract_prompt = assemble_prompt(
         "extract-signals", grounding_paths, state_path, program_root=program_root
     )

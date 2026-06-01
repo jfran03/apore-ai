@@ -7,7 +7,21 @@ from pathlib import Path
 
 from apore.providers.stub import StubProvider
 from apore.runtime import state
-from apore.runtime.core import QuestionResult, run_question_cycle
+from apore.runtime.core import QuestionResult, run_question_cycle, _parse_question_block
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for parsing functions
+# ---------------------------------------------------------------------------
+
+def test_parse_question_block_direct():
+    """Test _parse_question_block with a hardcoded string input."""
+    raw = "CONCEPT: my_concept\nTYPE: apply\nINTENDED_DIFFICULTY: 0.7\n\nExplain X. [Source: foo]"
+    concept, qtype, difficulty, text = _parse_question_block(raw)
+    assert concept == "my_concept"
+    assert qtype == "apply"
+    assert difficulty == pytest.approx(0.7)
+    assert "Explain X" in text
 
 
 # ---------------------------------------------------------------------------

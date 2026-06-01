@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { MotionConfig } from 'framer-motion';
 import { Nav } from './components/Nav';
 import { Home } from './pages/Home';
 import { Study } from './pages/Study';
@@ -8,16 +9,18 @@ import './styles/components.css';
 
 export function App() {
   return (
-    <BrowserRouter>
-      <Nav />
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/study" element={<Study />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/runs" element={<PlaceholderPage title="Runs" note="Run history — coming soon." />} />
-        <Route path="/graph" element={<PlaceholderPage title="Graph" note="Knowledge graph — coming soon." />} />
-      </Routes>
-    </BrowserRouter>
+    <MotionConfig reducedMotion="user">
+      <BrowserRouter>
+        <Nav />
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/study" element={<Study />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/runs" element={<PlaceholderPage title="Runs" note="Run history — coming soon." />} />
+          <Route path="/graph" element={<PlaceholderPage title="Graph" note="Knowledge graph — coming soon." />} />
+        </Routes>
+      </BrowserRouter>
+    </MotionConfig>
   );
 }
 

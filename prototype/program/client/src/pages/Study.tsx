@@ -44,6 +44,7 @@ export function Study() {
   const [startLoading, setStartLoading] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const handleStartSession = useCallback(async () => {
     setStartLoading(true);
@@ -81,6 +82,7 @@ export function Study() {
     async (response: string, rating: string, correct: string) => {
       if (!session?.currentQuestion) return;
       setSubmitLoading(true);
+      setSubmitError(null);
       try {
         const body = {
           learner_response: response,
@@ -118,7 +120,7 @@ export function Study() {
           };
         });
       } catch (err) {
-        console.error('Turn submission failed:', err);
+        setSubmitError(err instanceof Error ? err.message : 'Failed to submit turn');
       } finally {
         setSubmitLoading(false);
       }
@@ -176,6 +178,9 @@ export function Study() {
         {/* Left column — signal capture */}
         <div className="study-layout__main-capture">
           <SignalCapture onSubmit={handleSubmitTurn} loading={submitLoading} />
+          {submitError && (
+            <p className="study-start__error">{submitError}</p>
+          )}
         </div>
 
         {/* Right sidebar */}

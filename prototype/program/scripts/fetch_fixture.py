@@ -7,6 +7,7 @@ Run from program/ working directory:
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,11 @@ def main() -> None:
     program_root = Path(__file__).parent.parent
     manifest_path = program_root / "apore" / "fixtures" / "manifest.json"
 
+    if not manifest_path.exists():
+        print(f"Error: manifest.json not found at {manifest_path}", file=sys.stderr)
+        print("Run this script from the program/ directory.", file=sys.stderr)
+        sys.exit(1)
+
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     fixtures = manifest.get("fixtures", {})
 
@@ -51,7 +57,6 @@ def main() -> None:
 
         if target.exists():
             print(f"[{name}] wrong commit — re-cloning")
-            import shutil
             shutil.rmtree(target)
 
         target.parent.mkdir(parents=True, exist_ok=True)

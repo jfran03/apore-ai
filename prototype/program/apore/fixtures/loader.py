@@ -12,9 +12,10 @@ def get_grounding_paths(
 ) -> list[Path]:
     """Return wiki file paths for the concept from a fetched fixture.
 
-    If no wiki file matches concept_id exactly, returns all wiki files (fallback).
+    Performs substring match on stem for concept_id. Returns all wiki files if no match.
     Falls back gracefully if .fixtures/ doesn't exist.
     """
+    # Falls back to __file__ traversal; pass program_root explicitly when using installed package
     root = program_root if program_root is not None else Path(__file__).parent.parent.parent
     fixture_dir = root / ".fixtures" / fixture_name
 

@@ -4,25 +4,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from markitdown import MarkItDown
-
+from apore.knowledge.chapter import ChapterContext, ConceptGraph
+from apore.runtime.grounding import build_grounding_slice
 from apore.runtime.paths import get_program_root
 
 _VALID_PROTOCOLS = {"generate-question", "extract-signals"}
-_markitdown = MarkItDown()
 
 
 def assemble_prompt(
     protocol: str,
-    grounding_paths: list[Path],
     learner_state_path: Path,
+    *,
+    concept_id: str,
+    chapter: ChapterContext,
+    graph: ConceptGraph,
+    wiki_paths: list[Path],
     program_root: Path | None = None,
 ) -> dict:
-    """Return {"system": str, "messages": [{"role": "user", "content": str}]}.
-
-    System message: content of AGENTS.md
-    User message: [protocol content] + [grounding slice] + [learner state]
-    """
+    """Return {"system": str, "messages": [{"role": "user", "content": str}]}."""
     if protocol not in _VALID_PROTOCOLS:
         raise ValueError(f"Unknown protocol {protocol!r}; expected one of {_VALID_PROTOCOLS}")
 
@@ -32,13 +31,7 @@ def assemble_prompt(
 
     protocol_text = (root / "shared" / "protocols" / f"{protocol}.md").read_text(encoding="utf-8")
 
-    grounding_parts: list[str] = []
-    for p in grounding_paths:
-        try:
-            grounding_parts.append(_markitdown.convert(str(p)).text_content)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to convert grounding file {p}: {exc}") from exc
-    grounding_text = "\n\n".join(grounding_parts)
+    grounding_text = build_grounding_slice(chapter, graph, concept_id, wiki_paths)
 
     learner_state_text = learner_state_path.read_text(encoding="utf-8")
 

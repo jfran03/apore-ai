@@ -26,6 +26,8 @@ def test_run_sessions_produces_trajectories():
         num_sessions=3,
         questions_per_session=3,
         profile=profile,
+        provider_name="stub",
+        model="stub",
     )
     assert len(sessions) == 3
 
@@ -40,6 +42,8 @@ def test_trajectory_has_correct_shape():
         num_sessions=3,
         questions_per_session=3,
         profile=profile,
+        provider_name="stub",
+        model="stub",
     )
     for session in sessions:
         assert "session_id" in session

@@ -2,7 +2,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 interface QuestionCardProps {
   question_text: string;
-  concept: string;
+  concept_label: string;
+  concept_id?: string;
   question_type: string;
   intended_difficulty: number;
   question_number?: number;
@@ -19,7 +20,8 @@ function extractCitation(text: string): { main: string; citation: string | null 
 
 export function QuestionCard({
   question_text,
-  concept,
+  concept_label,
+  concept_id,
   question_type,
   intended_difficulty,
   question_number = 1,
@@ -37,7 +39,9 @@ export function QuestionCard({
         transition={{ duration: 0.15 }}
       >
         <div className="question-card__meta">
-          <span className="question-card__concept">{concept}</span>
+          <span className="question-card__concept" title={concept_id}>
+            {concept_label}
+          </span>
           <span className="question-card__type">{question_type}</span>
           <span className="question-card__difficulty">{intended_difficulty.toFixed(2)}</span>
         </div>

@@ -52,6 +52,15 @@ npm run dev
 
 Open http://localhost:5173 in your browser.
 
+### Configure API keys (BYOK)
+
+The prototype uses a bring-your-own-key model:
+
+- Open **Settings** in the client and enter an Anthropic and/or NVIDIA NIM key.
+- Anthropic is preferred when both are configured; NIM is the fallback.
+- Keys entered in Settings persist to `program/.apore/config.json` and are gitignored.
+- You can also pre-seed with `ANTHROPIC_API_KEY` or `NVIDIA_API_KEY` in `.env`.
+
 ### Run Python tests
 
 ```bash
@@ -59,12 +68,18 @@ cd program
 python -m pytest tests -q
 ```
 
-### Fetch the test fixture (optional — needed for real grounding)
+### Fetch the test fixture (needed for Study with apore-lite)
+
+**Setup UI (recommended):** open **Setup** in the client → **Fetch apore-lite**. This clones the pinned corpus, builds `concept-graph.json` from its wiki pages, and saves `fixture:apore-lite` for Study.
+
+**CLI (same behavior):**
 
 ```bash
 cd program
 python scripts/fetch_fixture.py
 ```
+
+Requires **Git** on your PATH. The clone lands in `program/.fixtures/apore-lite` (gitignored).
 
 ## Desktop app (Tauri)
 

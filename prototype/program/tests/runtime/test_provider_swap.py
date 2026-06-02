@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from apore.knowledge.chapter import resolve_chapter
 from apore.providers.stub import StubProvider
 from apore.runtime import state
 from apore.runtime.core import QuestionResult, run_question_cycle
@@ -45,7 +46,9 @@ _CONCEPTS = ["set_theory_intro", "set_theory_intro", "set_theory_intro"]  # 3 qu
 
 
 def _make_program_root(root: Path) -> Path:
-    """Minimal program_root with AGENTS.md and both protocols."""
+    """Minimal program_root with AGENTS.md, protocols, and a test chapter."""
+    import json
+
     (root / "shared" / "protocols").mkdir(parents=True)
     (root / "AGENTS.md").write_text("# Tutor Harness\nSystem content.", encoding="utf-8")
     (root / "shared" / "protocols" / "generate-question.md").write_text(
@@ -54,6 +57,16 @@ def _make_program_root(root: Path) -> Path:
     (root / "shared" / "protocols" / "extract-signals.md").write_text(
         "# Protocol: extract-signals\nExtract instructions.", encoding="utf-8"
     )
+    chapter = root / "domains" / "_sim" / "chapters" / "01-intro"
+    chapter.mkdir(parents=True)
+    graph = {
+        "nodes": [{"id": "set_theory_intro", "label": "Introduction to Set Theory", "depth": 1}],
+        "edges": [],
+    }
+    (chapter / "concept-graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    wiki = chapter / "wiki"
+    wiki.mkdir()
+    (wiki / "set_theory_intro.md").write_text("# Intro\n\nContent.", encoding="utf-8")
     return root
 
 
@@ -81,11 +94,13 @@ def _run_session(
             "provider": provider_name,
             "model": model,
         }
+        chapter = resolve_chapter("domain:_sim/01-intro", root)
         result = run_question_cycle(
             session_id=session_id,
             question_number=q,
             learner_response=_LEARNER_RESPONSE,
-            grounding_paths=[],
+            chapter=chapter,
+            concept_id="set_theory_intro",
             state_path=state_path,
             provider=provider,
             model=model,

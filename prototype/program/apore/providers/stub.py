@@ -5,10 +5,11 @@ import json
 from apore.providers.base import Provider
 
 _QUESTION_BLOCK = """\
-CONCEPT: set_theory_intro
-TYPE: recall
-INTENDED_DIFFICULTY: 0.5
-
+QUESTION
+concept: set_theory_intro
+type: recall
+intended_difficulty: 0.5
+---
 What is the difference between a set and a multiset? [Source: set_theory_intro — Introduction]\
 """
 
@@ -38,6 +39,12 @@ class StubProvider(Provider):
         model: str,
         config: dict,
     ) -> str:
+        protocol = config.get("protocol")
+        if protocol == "extract-signals":
+            return json.dumps(_SIGNALS)
+        if protocol == "generate-question":
+            return _QUESTION_BLOCK
+
         combined = system_prompt + " ".join(m.get("content", "") for m in messages)
         if "extract-signals" in combined:
             return json.dumps(_SIGNALS)

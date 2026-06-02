@@ -1,4 +1,4 @@
-"""Core orchestration loop for one question cycle (PRD §6)."""
+"""Core question cycle: generate question, extract signals, compute reward, update state."""
 
 from __future__ import annotations
 
@@ -8,16 +8,67 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from apore.knowledge.chapter import (
+    ChapterContext,
+    ConceptGraph,
+    get_wiki_paths,
+    load_concept_graph,
+    select_next_concept,
+)
 from apore.providers.base import Provider
 from apore.runtime import state
 from apore.runtime.context import assemble_prompt
-from apore.runtime.reward import QuestionSignals, compute_reward, update_difficulty
+from apore.runtime.reward import Correct, QuestionSignals, Rating, compute_reward, update_difficulty
+
+
+@dataclass
+class GeneratedQuestion:
+    question_number: int
+    concept_id: str
+    concept_label: str
+    question_type: str
+    intended_difficulty: float
+    question_text: str
+    gen_response: str
+
+    @property
+    def concept(self) -> str:
+        """Human-readable concept label (logging / backward compat)."""
+        return self.concept_label
+
+
+@dataclass
+class AssessmentResult:
+    """LLM-extracted signals before learner difficulty rating."""
+
+    correct: str
+    hint_count: int
+    turn_count: int
+    hedging_count: int
+    llm_explicit_rating: str = "ok"
+    llm_inconsistency: bool = False
+    flag_reason: str | None = None
+
+
+@dataclass
+class GradingResult:
+    question_number: int
+    explicit_rating: str
+    correct: str
+    hint_count: int
+    turn_count: int
+    hedging_count: int
+    reward: float
+    new_difficulty: float
+    inconsistency_flag: bool = False
 
 
 @dataclass
 class QuestionResult:
-    question_number: int
+    """Full generate + grade cycle (sim and legacy callers)."""
+
     session_id: str
+    question_number: int
     concept: str
     question_type: str
     intended_difficulty: float
@@ -30,139 +81,368 @@ class QuestionResult:
     hedging_count: int
     reward: float
     new_difficulty: float
-    metadata: dict  # fixture_commit, provider, model
+    metadata: dict
 
 
-def _parse_question_block(response: str) -> tuple[str, str, float, str]:
-    """Parse the generate-question response.
+def _strip_code_fence(text: str) -> str:
+    lines = text.strip().splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
-    Returns (concept, question_type, intended_difficulty, question_text).
 
-    Expected format:
-        CONCEPT: <value>
-        TYPE: <value>
-        INTENDED_DIFFICULTY: <value>
+def _parse_question_block_legacy(text: str) -> tuple[str, str, float, str]:
+    """Parse legacy CONCEPT:/TYPE:/INTENDED_DIFFICULTY: format."""
+    concept = "unknown"
+    qtype = "recall"
+    difficulty = 0.5
+    question_text = text
 
-        <question body (everything after the blank line)>
-    """
-    lines = response.splitlines()
-    concept = ""
-    question_type = ""
-    intended_difficulty = 0.5
-    blank_index = -1
+    for line in text.splitlines():
+        if line.startswith("CONCEPT:"):
+            concept = line.split(":", 1)[1].strip()
+        elif line.startswith("TYPE:"):
+            qtype = line.split(":", 1)[1].strip()
+        elif line.startswith("INTENDED_DIFFICULTY:"):
+            difficulty = float(line.split(":", 1)[1].strip())
 
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("CONCEPT:"):
-            concept = stripped[len("CONCEPT:"):].strip()
-        elif stripped.startswith("TYPE:"):
-            question_type = stripped[len("TYPE:"):].strip()
-        elif stripped.startswith("INTENDED_DIFFICULTY:"):
-            intended_difficulty = float(stripped[len("INTENDED_DIFFICULTY:"):].strip())
-        elif stripped == "" and blank_index == -1 and concept:
-            blank_index = i
-
-    if blank_index == -1:
-        question_text = ""
+    parts = text.split("\n\n", 1)
+    if len(parts) > 1:
+        question_text = parts[1].strip()
     else:
-        question_text = "\n".join(lines[blank_index + 1:]).strip()
+        lines = [l for l in text.splitlines() if not l.startswith(("CONCEPT:", "TYPE:", "INTENDED_DIFFICULTY:"))]
+        question_text = "\n".join(lines).strip()
 
-    return concept, question_type, intended_difficulty, question_text
-
-
-def _parse_signals(response: str) -> dict:
-    """Extract JSON object from the extract-signals response."""
-    match = re.search(r"\{.*?\}", response, re.DOTALL)
-    if not match:
-        raise ValueError(f"No JSON object found in extract-signals response: {response!r}")
-    return json.loads(match.group())
+    return concept, qtype, difficulty, question_text
 
 
-def run_question_cycle(
+def _parse_question_block_protocol(text: str) -> tuple[str, str, float, str]:
+    """Parse protocol QUESTION block with concept:/type:/--- body."""
+    lines = text.splitlines()
+    if lines and lines[0].strip().upper() == "QUESTION":
+        lines = lines[1:]
+
+    concept = "unknown"
+    qtype = "recall"
+    difficulty = 0.5
+    body_lines: list[str] = []
+    in_body = False
+
+    for line in lines:
+        if line.strip() == "---":
+            in_body = True
+            continue
+        if not in_body:
+            stripped = line.strip()
+            lower = stripped.lower()
+            if lower.startswith("concept:"):
+                concept = stripped.split(":", 1)[1].strip()
+            elif lower.startswith("type:"):
+                qtype = stripped.split(":", 1)[1].strip()
+            elif lower.startswith("intended_difficulty:"):
+                difficulty = float(stripped.split(":", 1)[1].strip())
+        else:
+            body_lines.append(line)
+
+    question_text = "\n".join(body_lines).strip()
+    return concept, qtype, difficulty, question_text
+
+
+def _parse_question_block(raw: str) -> tuple[str, str, float, str]:
+    """Parse generate-question response (protocol or legacy format)."""
+    text = _strip_code_fence(raw)
+    if re.search(r"^CONCEPT:", text, re.MULTILINE):
+        return _parse_question_block_legacy(text)
+    return _parse_question_block_protocol(text)
+
+
+def _parse_signals(raw: str) -> dict:
+    """Extract JSON object from extract-signals response."""
+    match = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
+    if match:
+        return json.loads(match.group())
+    return json.loads(raw.strip())
+
+
+def _signals_inconsistency(explicit_rating: str, hint_count: int, turn_count: int) -> tuple[bool, str | None]:
+    """FR-4.4: easy self-rating vs high scaffolding / turn count."""
+    if explicit_rating == "easy" and (hint_count >= 4 or turn_count >= 10):
+        return True, (
+            f"Learner rated easy but required {hint_count} hints and {turn_count} turns."
+        )
+    return False, None
+
+
+def _build_grade_messages(
+    question: GeneratedQuestion,
+    learner_response: str,
+    dialogue_transcript: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
+    """Assemble transcript messages for extract-signals (single-shot or multi-turn)."""
+    if dialogue_transcript:
+        return list(dialogue_transcript)
+    return [
+        {"role": "assistant", "content": question.gen_response},
+        {"role": "user", "content": learner_response},
+    ]
+
+
+def generate_question(
+    *,
     session_id: str,
     question_number: int,
-    learner_response: str,
-    grounding_paths: list[Path],
+    chapter: ChapterContext,
+    concept_id: str | None,
     state_path: Path,
     provider: Provider,
     model: str,
     config: dict,
     metadata: dict,
-    program_root: Path | None = None,
-) -> QuestionResult:
-    """Run one full question cycle: generate → respond → extract → reward → state append."""
+    program_root: Path,
+    mastery: dict[str, float] | None = None,
+) -> GeneratedQuestion:
+    """Generate a question via LLM only (no grading or state log)."""
+    graph = load_concept_graph(chapter)
+    scalar = state.read_scalar(state_path)
+    selected_id = select_next_concept(
+        graph, requested_id=concept_id, mastery=mastery, scalar=scalar
+    )
+    wiki_paths = get_wiki_paths(chapter, selected_id, graph)
 
-    # 1. Generate question
-    gen_prompt = assemble_prompt(
-        "generate-question", grounding_paths, state_path, program_root=program_root
+    assembled = assemble_prompt(
+        "generate-question",
+        state_path,
+        concept_id=selected_id,
+        chapter=chapter,
+        graph=graph,
+        wiki_paths=wiki_paths,
+        program_root=program_root,
     )
     gen_response = provider.invoke(
-        gen_prompt["system"], gen_prompt["messages"], model, config
+        assembled["system"],
+        assembled["messages"],
+        model,
+        {**config, "protocol": "generate-question"},
     )
-    concept, question_type, intended_difficulty, question_text = _parse_question_block(gen_response)
+    parsed_concept, question_type, intended_difficulty, question_text = _parse_question_block(
+        gen_response
+    )
+    if parsed_concept != selected_id and parsed_concept != "unknown":
+        metadata["concept_mismatch"] = {"expected": selected_id, "parsed": parsed_concept}
 
-    # 2. Extract signals
-    extract_prompt = assemble_prompt(
-        "extract-signals", grounding_paths, state_path, program_root=program_root
+    concept_label = graph.label_for(selected_id)
+    return GeneratedQuestion(
+        question_number=question_number,
+        concept_id=selected_id,
+        concept_label=concept_label,
+        question_type=question_type,
+        intended_difficulty=intended_difficulty,
+        question_text=question_text,
+        gen_response=gen_response,
     )
-    extract_messages = extract_prompt["messages"] + [
-        {"role": "assistant", "content": gen_response},
-        {"role": "user", "content": learner_response},
-    ]
+
+
+def assess_response(
+    *,
+    question: GeneratedQuestion,
+    learner_response: str,
+    chapter: ChapterContext,
+    state_path: Path,
+    provider: Provider,
+    model: str,
+    config: dict,
+    program_root: Path,
+    dialogue_transcript: list[dict[str, str]] | None = None,
+) -> AssessmentResult:
+    """LLM-only grading: correctness and implicit counts; no state write."""
+    graph = load_concept_graph(chapter)
+    wiki_paths = get_wiki_paths(chapter, question.concept_id, graph)
+    assembled = assemble_prompt(
+        "extract-signals",
+        state_path,
+        concept_id=question.concept_id,
+        chapter=chapter,
+        graph=graph,
+        wiki_paths=wiki_paths,
+        program_root=program_root,
+    )
+    transcript = _build_grade_messages(question, learner_response, dialogue_transcript)
+    messages = list(assembled["messages"]) + transcript
     extract_response = provider.invoke(
-        extract_prompt["system"], extract_messages, model, config
+        assembled["system"],
+        messages,
+        model,
+        {**config, "protocol": "extract-signals"},
     )
-    signals_data = _parse_signals(extract_response)
+    signals = _parse_signals(extract_response)
 
-    # 4. Compute reward
-    signals = QuestionSignals(
-        explicit_rating=signals_data["explicit_rating"],
-        correct=signals_data["correct"],
-        hint_count=int(signals_data["hint_count"]),
-        hedging_count=int(signals_data["hedging_count"]),
-        turn_count=int(signals_data["turn_count"]),
+    correct = signals.get("correct", "no")
+    hint_count = int(signals.get("hint_count", 0))
+    turn_count = int(signals.get("turn_count", 1))
+    hedging_count = int(signals.get("hedging_count", 0))
+    llm_inconsistency = bool(signals.get("inconsistency", False))
+    flag_reason = signals.get("flag_reason")
+
+    return AssessmentResult(
+        correct=correct,
+        hint_count=hint_count,
+        turn_count=turn_count,
+        hedging_count=hedging_count,
+        llm_explicit_rating=signals.get("explicit_rating", "ok"),
+        llm_inconsistency=llm_inconsistency,
+        flag_reason=flag_reason if isinstance(flag_reason, str) else None,
     )
-    reward = compute_reward(signals)
 
-    current_difficulty = state.read_scalar(state_path)
-    new_difficulty = update_difficulty(current_difficulty, reward)
 
-    # 5. Append state
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def finalize_turn(
+    *,
+    session_id: str,
+    question: GeneratedQuestion,
+    assessment: AssessmentResult,
+    explicit_rating: Rating,
+    state_path: Path,
+) -> GradingResult:
+    """Apply learner difficulty rating, compute reward, log, and update scalar."""
+    inconsistency, _reason = _signals_inconsistency(
+        explicit_rating, assessment.hint_count, assessment.turn_count
+    )
+    inconsistency_flag = inconsistency or assessment.llm_inconsistency
+
+    signals_obj = QuestionSignals(
+        explicit_rating=explicit_rating,
+        correct=assessment.correct,  # type: ignore[arg-type]
+        hint_count=assessment.hint_count,
+        hedging_count=assessment.hedging_count,
+        turn_count=assessment.turn_count,
+    )
+    reward = compute_reward(signals_obj)
+    new_difficulty = update_difficulty(state.read_scalar(state_path), reward)
+
     state.append_log_row(
         state_path,
         {
-            "Q#": question_number,
+            "Q#": question.question_number,
             "session": session_id,
-            "date": today,
-            "concept": concept,
-            "question_type": question_type,
-            "intended_difficulty": intended_difficulty,
-            "explicit_rating": signals.explicit_rating,
-            "correct": signals.correct,
-            "hints": signals.hint_count,
-            "turns": signals.turn_count,
-            "hedging": signals.hedging_count,
-            "reward_R": round(reward, 4),
-            "new_difficulty": round(new_difficulty, 4),
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "concept": question.concept_id,
+            "question_type": question.question_type,
+            "intended_difficulty": question.intended_difficulty,
+            "explicit_rating": explicit_rating,
+            "correct": assessment.correct,
+            "hints": assessment.hint_count,
+            "turns": assessment.turn_count,
+            "hedging": assessment.hedging_count,
+            "reward_R": reward,
+            "new_difficulty": new_difficulty,
         },
     )
     state.write_scalar(state_path, new_difficulty)
 
-    return QuestionResult(
-        question_number=question_number,
-        session_id=session_id,
-        concept=concept,
-        question_type=question_type,
-        intended_difficulty=intended_difficulty,
-        question_text=question_text,
-        learner_response=learner_response,
-        explicit_rating=signals.explicit_rating,
-        correct=signals.correct,
-        hint_count=signals.hint_count,
-        turn_count=signals.turn_count,
-        hedging_count=signals.hedging_count,
+    return GradingResult(
+        question_number=question.question_number,
+        explicit_rating=explicit_rating,
+        correct=assessment.correct,
+        hint_count=assessment.hint_count,
+        turn_count=assessment.turn_count,
+        hedging_count=assessment.hedging_count,
         reward=reward,
         new_difficulty=new_difficulty,
+        inconsistency_flag=inconsistency_flag,
+    )
+
+
+def grade_response(
+    *,
+    session_id: str,
+    question: GeneratedQuestion,
+    learner_response: str,
+    chapter: ChapterContext,
+    state_path: Path,
+    provider: Provider,
+    model: str,
+    config: dict,
+    metadata: dict,
+    program_root: Path,
+    explicit_rating: Rating | None = None,
+    dialogue_transcript: list[dict[str, str]] | None = None,
+) -> GradingResult:
+    """One-shot grade + finalize (sim harness and legacy callers)."""
+    assessment = assess_response(
+        question=question,
+        learner_response=learner_response,
+        chapter=chapter,
+        state_path=state_path,
+        provider=provider,
+        model=model,
+        config=config,
+        program_root=program_root,
+        dialogue_transcript=dialogue_transcript,
+    )
+    rating: Rating = explicit_rating or assessment.llm_explicit_rating  # type: ignore[assignment]
+    return finalize_turn(
+        session_id=session_id,
+        question=question,
+        assessment=assessment,
+        explicit_rating=rating,
+        state_path=state_path,
+    )
+
+
+def run_question_cycle(
+    *,
+    session_id: str,
+    question_number: int,
+    learner_response: str,
+    chapter: ChapterContext,
+    concept_id: str | None = None,
+    state_path: Path,
+    provider: Provider,
+    model: str,
+    config: dict,
+    metadata: dict,
+    program_root: Path,
+) -> QuestionResult:
+    """Generate a question, grade the learner response, update state (sim harness)."""
+    generated = generate_question(
+        session_id=session_id,
+        question_number=question_number,
+        chapter=chapter,
+        concept_id=concept_id,
+        state_path=state_path,
+        provider=provider,
+        model=model,
+        config=config,
+        metadata=metadata,
+        program_root=program_root,
+    )
+    grading = grade_response(
+        session_id=session_id,
+        question=generated,
+        learner_response=learner_response,
+        chapter=chapter,
+        state_path=state_path,
+        provider=provider,
+        model=model,
+        config=config,
+        metadata=metadata,
+        program_root=program_root,
+    )
+    return QuestionResult(
+        session_id=session_id,
+        question_number=generated.question_number,
+        concept=generated.concept_label,
+        question_type=generated.question_type,
+        intended_difficulty=generated.intended_difficulty,
+        question_text=generated.question_text,
+        learner_response=learner_response,
+        explicit_rating=grading.explicit_rating,
+        correct=grading.correct,
+        hint_count=grading.hint_count,
+        turn_count=grading.turn_count,
+        hedging_count=grading.hedging_count,
+        reward=grading.reward,
+        new_difficulty=grading.new_difficulty,
         metadata=metadata,
     )

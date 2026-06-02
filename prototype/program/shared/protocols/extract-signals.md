@@ -12,18 +12,28 @@ Your sole output is a JSON object. No prose. No markdown fences. No explanation.
 Read the transcript from start to finish. Extract:
 
 ### explicit_rating
-The learner's self-declared difficulty rating for this question.
+The learner's self-declared difficulty rating for this question, **only if stated in the transcript text**.
 - Look for phrases like "that was easy," "easy," "ok," "okay," "hard,"
   "that was difficult," or a direct response to "How did you find that question?"
 - Map to one of: `"easy"`, `"ok"`, `"hard"`.
-- If no rating is present, use `"ok"`.
+- If the learner did **not** state a rating in the transcript (e.g. they used UI
+  buttons elsewhere), use `"ok"` as a placeholder. The runtime replaces this with
+  the learner's button choice on a later step.
 
 ### correct
-Did the learner reach a correct final answer before the Teacher closed the exchange?
+Whether the learner's final answer is substantively correct.
+
+**Multi-turn Socratic exchange** (Teacher turns present in the transcript):
 - `"yes"` if the Teacher explicitly confirmed correctness.
 - `"no"` if the Teacher closed without confirming, the learner gave up, or
   the exchange ended with an incorrect answer.
 - Ambiguous closures (Teacher redirected without confirming) → `"no"`.
+
+**Single-shot exchange** (only the posed question and one learner answer, no Teacher
+hints or confirmations in the transcript):
+- Judge the learner's answer against the question and the grounding context.
+- `"yes"` if the answer is substantively correct for the concept being tested.
+- `"no"` if incorrect, incomplete in a way that fails the question, or empty.
 
 ### hint_count
 Count every Teacher turn that provided a hint, structural prompt, or leading
@@ -31,11 +41,13 @@ question intended to move the learner toward the answer.
 - Do NOT count: the original question, confirmations ("Yes, exactly"), or
   simple restatements of the question without new scaffolding.
 - Each hint is one count, regardless of length.
+- For a single-shot exchange with no Teacher hints, use `0`.
 
 ### turn_count
 Count every learner turn from the question being posed to (and including)
-the learner's final response before the Teacher closed the exchange.
+the learner's final response before the exchange closed.
 - A "turn" is one learner message, regardless of length.
+- For a single learner answer with no prior learner turns, use `1`.
 
 ### hedging_count
 Count every distinct hedging phrase in the learner's turns across the full
@@ -50,13 +62,16 @@ exchange.
 
 ---
 
-## Inconsistency check
+## Inconsistency check (LLM-side hints only)
 
 After extracting all fields, check:
 
 - If `explicit_rating == "easy"` AND (`hint_count >= 4` OR `turn_count >= 10`):
   add `"inconsistency": true` and a `"flag_reason"` string (one sentence
   describing the discrepancy).
+
+The runtime may apply the same rule again after the learner submits their
+difficulty rating via the UI.
 
 ---
 

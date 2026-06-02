@@ -1,42 +1,49 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getProviderConfig, setProviderConfig } from '../api/client';
-import type { ProviderConfig } from '../api/types';
-
-const PROVIDERS = ['anthropic', 'nim', 'stub'] as const;
-type Provider = (typeof PROVIDERS)[number];
-
-const DEFAULT_MODELS: Record<Provider, string> = {
-  anthropic: 'claude-sonnet-4-5',
-  nim: 'meta/llama-3.3-70b-instruct',
-  stub: 'stub',
-};
+import type { ProviderConfig, ProviderConfigUpdate } from '../api/types';
 
 export function Settings() {
-  const [provider, setProvider] = useState<Provider>('anthropic');
-  const [model, setModel] = useState(DEFAULT_MODELS['anthropic']);
+  const [config, setConfig] = useState<ProviderConfig | null>(null);
+  const [anthropicKey, setAnthropicKey] = useState('');
+  const [nimKey, setNimKey] = useState('');
+  const [model, setModel] = useState('');
+  const [anthropicTouched, setAnthropicTouched] = useState(false);
+  const [nimTouched, setNimTouched] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const activeProviderLabel = useMemo(() => {
+    if (!config?.active_provider) return 'No provider configured';
+    return `${config.active_provider} (${config.active_model ?? 'default model'})`;
+  }, [config]);
+
   useEffect(() => {
-    getProviderConfig()
-      .then((cfg: ProviderConfig) => {
-        setProvider(cfg.provider as Provider);
-        setModel(cfg.model);
-      })
-      .catch((err: unknown) => {
-        setLoadError(err instanceof Error ? err.message : 'Failed to load config');
-      });
+    void refreshConfig();
   }, []);
 
-  function handleProviderChange(next: Provider) {
-    setProvider(next);
-    setModel(DEFAULT_MODELS[next]);
+  async function refreshConfig() {
+    try {
+      const cfg = await getProviderConfig();
+      setConfig(cfg);
+      setModel(cfg.model);
+      setAnthropicKey('');
+      setNimKey('');
+      setAnthropicTouched(false);
+      setNimTouched(false);
+      setLoadError(null);
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load config');
+    }
   }
 
   async function handleSave() {
     setSaveStatus('saving');
     try {
-      await setProviderConfig({ provider, model });
+      const payload: ProviderConfigUpdate = { model };
+      if (anthropicTouched) payload.anthropic_api_key = anthropicKey;
+      if (nimTouched) payload.nim_api_key = nimKey;
+      await setProviderConfig(payload);
+      await refreshConfig();
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch {
@@ -48,36 +55,69 @@ export function Settings() {
     <main className="page">
       <h1 className="page__title">Settings</h1>
 
-      {/* Provider & Model */}
       <section style={styles.section}>
-        <h2 style={styles.sectionHeading}>Provider &amp; Model</h2>
+        <h2 style={styles.sectionHeading}>Bring Your Own Key</h2>
         <div className="card" style={styles.card}>
           {loadError && (
             <p style={styles.errorText}>Could not load current config: {loadError}</p>
           )}
 
-          <fieldset style={styles.fieldset}>
-            <legend style={styles.legend}>Provider</legend>
-            <div style={styles.radioGroup}>
-              {PROVIDERS.map((p) => (
-                <label key={p} style={styles.radioLabel}>
-                  <input
-                    type="radio"
-                    name="provider"
-                    value={p}
-                    checked={provider === p}
-                    onChange={() => handleProviderChange(p)}
-                    style={styles.radioInput}
-                  />
-                  <span style={styles.radioText}>{p}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
+          <p style={styles.statusLine}>
+            <span style={styles.statusLabel}>Active provider</span>
+            <span>{activeProviderLabel}</span>
+          </p>
+
+          <div style={styles.field}>
+            <label htmlFor="anthropic-key" style={styles.fieldLabel}>
+              Anthropic API key
+            </label>
+            <input
+              id="anthropic-key"
+              type="password"
+              value={anthropicKey}
+              onChange={(e) => {
+                setAnthropicTouched(true);
+                setAnthropicKey(e.target.value);
+              }}
+              placeholder="sk-ant-..."
+              style={styles.textInput}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <span style={styles.hintText}>
+              {config?.anthropic_api_key_set
+                ? `Configured (${config.anthropic_api_key_hint ?? 'hidden'})`
+                : 'Not configured'}
+            </span>
+          </div>
+
+          <div style={styles.field}>
+            <label htmlFor="nim-key" style={styles.fieldLabel}>
+              NVIDIA NIM API key
+            </label>
+            <input
+              id="nim-key"
+              type="password"
+              value={nimKey}
+              onChange={(e) => {
+                setNimTouched(true);
+                setNimKey(e.target.value);
+              }}
+              placeholder="nvapi-..."
+              style={styles.textInput}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <span style={styles.hintText}>
+              {config?.nim_api_key_set
+                ? `Configured (${config.nim_api_key_hint ?? 'hidden'})`
+                : 'Not configured'}
+            </span>
+          </div>
 
           <div style={styles.field}>
             <label htmlFor="model-input" style={styles.fieldLabel}>
-              Model
+              Model override (optional)
             </label>
             <input
               id="model-input"
@@ -87,6 +127,9 @@ export function Settings() {
               style={styles.textInput}
               spellCheck={false}
             />
+            <span style={styles.hintText}>
+              Leave blank to use provider defaults.
+            </span>
           </div>
 
           <div style={styles.actionRow}>
@@ -104,7 +147,6 @@ export function Settings() {
         </div>
       </section>
 
-      {/* Fixture */}
       <section style={styles.section}>
         <h2 style={styles.sectionHeading}>Fixture</h2>
         <div className="card" style={styles.card}>
@@ -127,7 +169,6 @@ export function Settings() {
         </div>
       </section>
 
-      {/* About */}
       <section style={styles.section}>
         <h2 style={styles.sectionHeading}>About</h2>
         <div className="card" style={styles.card}>
@@ -167,38 +208,17 @@ const styles = {
     flexDirection: 'column' as const,
     gap: 'var(--spacing-base)',
   },
-  fieldset: {
-    border: 'none',
+  statusLine: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 'var(--spacing-xxs)',
     margin: 0,
-    padding: 0,
-  },
-  legend: {
-    fontSize: 'var(--font-size-body-sm)',
-    fontWeight: 'var(--font-weight-medium)' as const,
-    color: 'var(--color-body)',
-    marginBottom: 'var(--spacing-xs)',
-  },
-  radioGroup: {
-    display: 'flex',
-    gap: 'var(--spacing-base)',
-    flexWrap: 'wrap' as const,
-  },
-  radioLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 'var(--spacing-xs)',
-    minHeight: '44px',
-    cursor: 'pointer',
-  },
-  radioInput: {
-    accentColor: 'var(--color-primary)',
-    width: '16px',
-    height: '16px',
-    cursor: 'pointer',
-  },
-  radioText: {
     fontSize: 'var(--font-size-body-sm)',
     color: 'var(--color-ink)',
+  },
+  statusLabel: {
+    fontWeight: 'var(--font-weight-medium)' as const,
+    color: 'var(--color-body)',
   },
   field: {
     display: 'flex',
@@ -209,6 +229,10 @@ const styles = {
     fontSize: 'var(--font-size-body-sm)',
     fontWeight: 'var(--font-weight-medium)' as const,
     color: 'var(--color-body)',
+  },
+  hintText: {
+    fontSize: 'var(--font-size-caption)',
+    color: 'var(--color-muted)',
   },
   textInput: {
     height: '44px',

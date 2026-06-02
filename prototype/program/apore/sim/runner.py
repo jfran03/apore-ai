@@ -11,6 +11,8 @@ import json
 from apore.providers.stub import StubProvider
 from apore.providers import get_provider
 from apore.providers.base import Provider
+from apore.providers.anthropic_adapter import DEFAULT_MODEL as DEFAULT_ANTHROPIC_MODEL
+from apore.knowledge.chapter import resolve_chapter
 from apore.runtime import state as state_mod
 from apore.runtime.core import run_question_cycle
 from apore.sim.convergence import write_artifacts
@@ -29,6 +31,23 @@ def _make_minimal_program_root(tmp_path: Path) -> Path:
     (root / "shared" / "protocols" / "extract-signals.md").write_text(
         "# Protocol: extract-signals\nExtract signals.", encoding="utf-8"
     )
+
+    chapter = root / "domains" / "_sim" / "chapters" / "01-intro"
+    chapter.mkdir(parents=True)
+    graph = {
+        "nodes": [
+            {
+                "id": "set_theory_intro",
+                "label": "Introduction to Set Theory",
+                "depth": 1,
+            }
+        ],
+        "edges": [],
+    }
+    (chapter / "concept-graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    wiki = chapter / "wiki"
+    wiki.mkdir()
+    (wiki / "set_theory_intro.md").write_text("# Set theory intro\n\nContent.", encoding="utf-8")
     return root
 
 
@@ -36,9 +55,10 @@ def run_sessions(
     num_sessions: int,
     questions_per_session: int,
     profile: StudentProfile,
-    provider_name: str = "stub",
-    model: str = "stub",
+    provider_name: str = "anthropic",
+    model: str = DEFAULT_ANTHROPIC_MODEL,
     fixture_name: str = "apore-lite",
+    knowledge_source: str | None = None,
     output_dir: Path | None = None,
     program_root: Path | None = None,
     reset_between_sessions: bool = False,
@@ -68,8 +88,12 @@ def run_sessions(
 
         if program_root is None:
             prog_root = _make_minimal_program_root(tmp)
+            kb_source = knowledge_source or "domain:_sim/01-intro"
         else:
             prog_root = program_root
+            kb_source = knowledge_source or f"fixture:{fixture_name}"
+
+        chapter = resolve_chapter(kb_source, prog_root)
 
         # Shared state file — carried over across sessions unless reset requested.
         shared_state_path = tmp / "learner-state.md"
@@ -99,7 +123,8 @@ def run_sessions(
                     session_id=session_id,
                     question_number=q_num,
                     learner_response=learner_response,
-                    grounding_paths=[],
+                    chapter=chapter,
+                    concept_id="set_theory_intro",
                     state_path=state_path,
                     provider=provider,
                     model=model,

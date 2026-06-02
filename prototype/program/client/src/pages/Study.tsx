@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
-import { createSession, postTurn, getSessionState } from '../api/client';
+import { createSession, fetchQuestion, postTurn, getSessionState } from '../api/client';
+import type { QuestionResponse } from '../api/types';
 import { QuestionCard } from '../components/QuestionCard';
 import { TurnThread } from '../components/TurnThread';
-import { SignalCapture } from '../components/SignalCapture';
+import { SignalCapture, type GradeResult } from '../components/SignalCapture';
 import { ScalarBadge } from '../components/ScalarBadge';
 import type { TurnRecord } from '../components/TurnThread';
 import '../styles/study.css';
@@ -10,7 +11,8 @@ import '../styles/study.css';
 interface CurrentQuestion {
   question_number: number;
   question_text: string;
-  concept: string;
+  concept_id: string;
+  concept_label: string;
   question_type: string;
   intended_difficulty: number;
 }
@@ -21,21 +23,19 @@ interface SessionState {
   questionCount: number;
   currentQuestion: CurrentQuestion | null;
   turns: TurnRecord[];
+  capturePhase: 'answer' | 'rating';
+  graded: GradeResult | null;
+  pendingLearnerResponse: string | null;
 }
 
-// The stub backend returns a question as part of TurnResponse.
-// question_text in TurnResponse is the *next* question after the turn.
-function buildCurrentQuestion(
-  questionText: string,
-  questionNumber: number,
-  difficulty: number,
-): CurrentQuestion {
+function buildCurrentQuestion(q: QuestionResponse): CurrentQuestion {
   return {
-    question_number: questionNumber,
-    question_text: questionText,
-    concept: 'set_theory_intro',
-    question_type: 'free_response',
-    intended_difficulty: difficulty,
+    question_number: q.question_number,
+    question_text: q.question_text,
+    concept_id: q.concept_id,
+    concept_label: q.concept_label,
+    question_type: q.question_type,
+    intended_difficulty: q.intended_difficulty,
   };
 }
 
@@ -43,65 +43,124 @@ export function Study() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [startLoading, setStartLoading] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [questionLoading, setQuestionLoading] = useState(false);
+  const [questionError, setQuestionError] = useState<string | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const loadNextQuestion = useCallback(async (sessionId: string) => {
+    setQuestionLoading(true);
+    setQuestionError(null);
+    try {
+      const q = await fetchQuestion(sessionId, {});
+      const state = await getSessionState(sessionId);
+      setSession((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          scalar: state.scalar,
+          questionCount: state.question_count,
+          currentQuestion: buildCurrentQuestion(q),
+          capturePhase: 'answer',
+          graded: null,
+          pendingLearnerResponse: null,
+        };
+      });
+    } catch (err) {
+      setQuestionError(err instanceof Error ? err.message : 'Failed to load question');
+    } finally {
+      setQuestionLoading(false);
+    }
+  }, []);
 
   const handleStartSession = useCallback(async () => {
     setStartLoading(true);
     setStartError(null);
     try {
-      const res = await createSession({ provider: 'stub', model: 'stub', fixture: 'apore-lite' });
-      // After creating the session, fetch the first question via a lightweight turn
-      // The stub provider synthesises a question on the first /turn call.
-      // We initialise with a placeholder question and let the first real submit
-      // replace it. Alternatively, call postTurn immediately to get Q1.
-      const firstTurn = await postTurn(res.session_id, {
-        learner_response: '',
-        concept_id: 'set_theory_intro',
-      });
+      const res = await createSession({});
       const state = await getSessionState(res.session_id);
       setSession({
         sessionId: res.session_id,
         scalar: state.scalar,
         questionCount: state.question_count,
-        currentQuestion: buildCurrentQuestion(
-          firstTurn.question_text,
-          firstTurn.question_number,
-          firstTurn.new_difficulty,
-        ),
+        currentQuestion: null,
         turns: [],
+        capturePhase: 'answer',
+        graded: null,
+        pendingLearnerResponse: null,
       });
+      await loadNextQuestion(res.session_id);
     } catch (err) {
       setStartError(err instanceof Error ? err.message : 'Failed to start session');
     } finally {
       setStartLoading(false);
     }
-  }, []);
+  }, [loadNextQuestion]);
 
-  const handleSubmitTurn = useCallback(
-    async (response: string, rating: string, correct: string) => {
+  const handleSubmitAnswer = useCallback(
+    async (response: string) => {
       if (!session?.currentQuestion) return;
       setSubmitLoading(true);
       setSubmitError(null);
       try {
-        const body = {
+        const gradeRes = await postTurn(session.sessionId, {
           learner_response: response,
-          concept_id: 'set_theory_intro',
-          explicit_rating: rating,
-          correct,
+          concept_id: session.currentQuestion.concept_id,
+        });
+
+        if (gradeRes.phase !== 'graded') {
+          throw new Error('Expected graded phase after submitting answer');
+        }
+
+        const graded: GradeResult = {
+          question_number: gradeRes.question_number,
+          correct: gradeRes.correct,
+          hint_count: gradeRes.hint_count,
+          turn_count: gradeRes.turn_count,
+          hedging_count: gradeRes.hedging_count,
+          flag_reason: gradeRes.flag_reason,
         };
 
-        const turnRes = await postTurn(session.sessionId, body);
-        const state = await getSessionState(session.sessionId);
+        setSession((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            capturePhase: 'rating',
+            graded,
+            pendingLearnerResponse: response,
+          };
+        });
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : 'Failed to grade answer');
+      } finally {
+        setSubmitLoading(false);
+      }
+    },
+    [session],
+  );
+
+  const handleSubmitRating = useCallback(
+    async (rating: 'easy' | 'ok' | 'hard') => {
+      if (!session?.currentQuestion || !session.graded || !session.pendingLearnerResponse) return;
+      setSubmitLoading(true);
+      setSubmitError(null);
+      try {
+        const turnRes = await postTurn(session.sessionId, {
+          explicit_rating: rating,
+        });
+
+        if (turnRes.phase !== 'completed') {
+          throw new Error('Expected completed phase after submitting rating');
+        }
 
         const completedTurn: TurnRecord = {
           question_number: session.currentQuestion.question_number,
           question_text: session.currentQuestion.question_text,
-          learner_response: response,
-          explicit_rating: rating,
-          correct,
-          reward: turnRes.reward,
-          new_difficulty: turnRes.new_difficulty,
+          learner_response: session.pendingLearnerResponse,
+          explicit_rating: turnRes.explicit_rating ?? rating,
+          correct: turnRes.correct,
+          reward: turnRes.reward ?? 0,
+          new_difficulty: turnRes.new_difficulty ?? session.scalar,
           inconsistency_flag: turnRes.inconsistency_flag,
         };
 
@@ -109,23 +168,22 @@ export function Study() {
           if (!prev) return prev;
           return {
             ...prev,
-            scalar: state.scalar,
-            questionCount: state.question_count,
+            scalar: turnRes.new_difficulty ?? prev.scalar,
             turns: [...prev.turns, completedTurn],
-            currentQuestion: buildCurrentQuestion(
-              turnRes.question_text,
-              turnRes.question_number,
-              turnRes.new_difficulty,
-            ),
+            capturePhase: 'answer',
+            graded: null,
+            pendingLearnerResponse: null,
           };
         });
+
+        await loadNextQuestion(session.sessionId);
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : 'Failed to submit turn');
+        setSubmitError(err instanceof Error ? err.message : 'Failed to submit rating');
       } finally {
         setSubmitLoading(false);
       }
     },
-    [session],
+    [session, loadNextQuestion],
   );
 
   if (!session) {
@@ -134,7 +192,7 @@ export function Study() {
         <div className="study-start">
           <h1 className="study-start__heading">Study Session</h1>
           <p className="study-start__sub">
-            Start an adaptive session using the set theory introduction fixture.
+            Start an adaptive session using the knowledge source saved in Setup.
           </p>
           <button
             type="button"
@@ -152,22 +210,29 @@ export function Study() {
     );
   }
 
-  const { scalar, questionCount, currentQuestion, turns } = session;
+  const { scalar, questionCount, currentQuestion, turns, capturePhase, graded } = session;
+  const busy = submitLoading || questionLoading;
+  const showCapture = currentQuestion && !questionLoading;
 
   return (
     <main className="study-page">
       <div className="study-layout">
-        {/* Left column — thread */}
         <div className="study-layout__main-thread">
           <TurnThread turns={turns} />
         </div>
 
-        {/* Left column — question card */}
         <div className="study-layout__main-question">
-          {currentQuestion && (
+          {questionLoading && (
+            <p className="study-start__sub">Generating next question…</p>
+          )}
+          {questionError && (
+            <p className="study-start__error">{questionError}</p>
+          )}
+          {currentQuestion && !questionLoading && (
             <QuestionCard
               question_text={currentQuestion.question_text}
-              concept={currentQuestion.concept}
+              concept_label={currentQuestion.concept_label}
+              concept_id={currentQuestion.concept_id}
               question_type={currentQuestion.question_type}
               intended_difficulty={currentQuestion.intended_difficulty}
               question_number={currentQuestion.question_number}
@@ -175,20 +240,28 @@ export function Study() {
           )}
         </div>
 
-        {/* Left column — signal capture */}
         <div className="study-layout__main-capture">
-          <SignalCapture onSubmit={handleSubmitTurn} loading={submitLoading} />
+          {showCapture && (
+            <SignalCapture
+              phase={capturePhase}
+              graded={graded}
+              onSubmitAnswer={handleSubmitAnswer}
+              onSubmitRating={handleSubmitRating}
+              loading={busy}
+            />
+          )}
           {submitError && (
             <p className="study-start__error">{submitError}</p>
           )}
         </div>
 
-        {/* Right sidebar */}
         <aside className="study-layout__sidebar">
           <div className="study-sidebar-meta">
             <div className="study-sidebar-meta__row">
               <span className="study-sidebar-meta__key">Concept</span>
-              <span className="study-sidebar-meta__val">set_theory_intro</span>
+              <span className="study-sidebar-meta__val">
+                {currentQuestion?.concept_label ?? '—'}
+              </span>
             </div>
             <div className="study-sidebar-meta__row">
               <span className="study-sidebar-meta__key">Questions</span>

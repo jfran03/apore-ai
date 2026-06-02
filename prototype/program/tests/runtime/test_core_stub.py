@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pathlib import Path
 
+from apore.knowledge.chapter import resolve_chapter
 from apore.providers.stub import StubProvider
 from apore.runtime import state
 from apore.runtime.core import QuestionResult, run_question_cycle, _parse_question_block
@@ -24,6 +25,22 @@ def test_parse_question_block_direct():
     assert "Explain X" in text
 
 
+def test_parse_question_block_protocol_format():
+    """Test _parse_question_block with protocol QUESTION block format."""
+    raw = """QUESTION
+concept: set_theory_intro
+type: apply
+intended_difficulty: 0.65
+depth: 2
+---
+What distinguishes a set from a multiset? [Source: set_theory_intro — Intro]"""
+    concept, qtype, difficulty, text = _parse_question_block(raw)
+    assert concept == "set_theory_intro"
+    assert qtype == "apply"
+    assert difficulty == pytest.approx(0.65)
+    assert "multiset" in text
+
+
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
@@ -40,6 +57,25 @@ def _make_program_root(tmp_path: Path) -> Path:
     (root / "shared" / "protocols" / "extract-signals.md").write_text(
         "# Protocol: extract-signals\nExtract instructions.", encoding="utf-8"
     )
+
+    import json
+
+    chapter = root / "domains" / "_test" / "chapters" / "01-intro"
+    chapter.mkdir(parents=True)
+    graph = {
+        "nodes": [
+            {
+                "id": "set_theory_intro",
+                "label": "Introduction to Set Theory",
+                "depth": 1,
+            }
+        ],
+        "edges": [],
+    }
+    (chapter / "concept-graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    wiki = chapter / "wiki"
+    wiki.mkdir()
+    (wiki / "set_theory_intro.md").write_text("# Intro\n\nSets are collections.", encoding="utf-8")
     return root
 
 
@@ -51,6 +87,7 @@ def _run_cycle(
     learner_response: str = "A set has unique elements; a multiset allows duplicates.",
 ) -> QuestionResult:
     root = _make_program_root(tmp_path / f"root_{question_number}")
+    chapter = resolve_chapter("domain:_test/01-intro", root)
     metadata = {
         "fixture_commit": "abc1234",
         "provider": "stub",
@@ -60,7 +97,8 @@ def _run_cycle(
         session_id=session_id,
         question_number=question_number,
         learner_response=learner_response,
-        grounding_paths=[],
+        chapter=chapter,
+        concept_id="set_theory_intro",
         state_path=state_path,
         provider=StubProvider(),
         model="stub-model",
@@ -99,7 +137,7 @@ def test_parsed_concept_from_stub(tmp_path: Path):
     state_path = tmp_path / "learner-state.md"
     state.initialize(state_path)
     result = _run_cycle(tmp_path, state_path)
-    assert result.concept == "set_theory_intro"
+    assert result.concept == "Introduction to Set Theory"
 
 
 def test_parsed_question_type_from_stub(tmp_path: Path):

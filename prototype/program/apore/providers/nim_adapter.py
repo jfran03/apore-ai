@@ -1,24 +1,26 @@
 """NVIDIA NIM provider (OpenAI-compatible endpoint)."""
 
-import os
-
 from openai import OpenAI
 
+from apore.config.llm import get_nim_api_key
 from apore.providers.base import Provider
 
-DEFAULT_MODEL = "meta/llama-3.1-8b-instruct"
+DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"
 
 
 class NIMProvider(Provider):
-    """Calls NVIDIA NIM via the OpenAI-compatible endpoint. Reads NVIDIA_API_KEY from env."""
+    """Calls NVIDIA NIM via the OpenAI-compatible endpoint."""
 
     _BASE_URL = "https://integrate.api.nvidia.com/v1"
 
-    def __init__(self) -> None:
-        api_key = os.environ.get("NVIDIA_API_KEY")
-        if not api_key:
-            raise ValueError("NVIDIA_API_KEY environment variable is not set")
-        self._client = OpenAI(base_url=self._BASE_URL, api_key=api_key)
+    def __init__(self, api_key: str | None = None) -> None:
+        resolved = api_key or get_nim_api_key()
+        if not resolved:
+            raise ValueError(
+                "NVIDIA NIM API key is not configured. Set nim_api_key in "
+                ".apore/config.json or NVIDIA_API_KEY in the environment."
+            )
+        self._client = OpenAI(base_url=self._BASE_URL, api_key=resolved)
 
     def invoke(
         self,

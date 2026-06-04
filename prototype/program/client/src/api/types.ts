@@ -1,13 +1,18 @@
 export interface CreateSessionRequest {
   knowledge_source?: string;
   fixture?: string;
+  focus_mode?: 'adaptive' | 'weak_points';
+  max_questions?: number;
 }
 
 export interface CreateSessionResponse {
   session_id: string;
+  title: string;
   scalar: number;
   created_at: string;
   knowledge_source: string;
+  focus_mode: 'adaptive' | 'weak_points';
+  max_questions: number;
 }
 
 export interface QuestionRequest {
@@ -16,6 +21,7 @@ export interface QuestionRequest {
 
 export interface QuestionResponse {
   question_number: number;
+  question_id: string;
   concept_id: string;
   concept_label: string;
   concept: string;
@@ -25,16 +31,32 @@ export interface QuestionResponse {
 }
 
 export interface TurnRequest {
+  learner_message?: string;
+  /** @deprecated Use learner_message */
   learner_response?: string;
   concept_id?: string;
+  skip?: boolean;
+  skip_reason?: string;
   explicit_rating?: string;
+  /** Leave post-rating reflection and advance to the next question */
+  continue?: boolean;
   /** @deprecated Correctness is LLM-assessed on the grade step */
   correct?: string;
 }
 
+export type TurnPhase =
+  | 'dialogue'
+  | 'skip_prompt'
+  | 'graded'
+  | 'reflection'
+  | 'completed'
+  | 'session_complete';
+
 export interface TurnResponse {
-  phase: 'graded' | 'completed';
+  phase: TurnPhase;
   question_number: number;
+  tutor_message?: string | null;
+  question_closed?: boolean;
   correct: string;
   hint_count: number;
   turn_count: number;
@@ -48,10 +70,14 @@ export interface TurnResponse {
 
 export interface SessionStateResponse {
   session_id: string;
+  title: string;
   scalar: number;
   question_count: number;
   mastery: Record<string, number>;
   knowledge_source: string;
+  focus_mode: 'adaptive' | 'weak_points';
+  max_questions: number;
+  questions_remaining: number;
   active_concept_id?: string | null;
 }
 
@@ -102,6 +128,8 @@ export interface KnowledgeChapter {
   source_files: string[];
   has_concept_graph: boolean;
   wiki_count: number;
+  has_question_bank: boolean;
+  question_bank_count: number;
 }
 
 export interface KnowledgeDomain {
@@ -118,6 +146,7 @@ export interface FixtureFetchResult {
   name: string;
   commit: string;
   path: string;
+  knowledge_source: string;
   status: string;
   chapter_ready: boolean;
   chapter_path?: string | null;
@@ -129,4 +158,30 @@ export interface StubCompileResult {
   nodes: number;
   wiki_files: number;
   concept_graph: string;
+}
+
+export interface QuestionBankEntry {
+  id: string;
+  concept_id: string;
+  type: string;
+  intended_difficulty: number;
+  text: string;
+  depth?: number;
+}
+
+export interface QuestionBankResponse {
+  version: number;
+  questions: QuestionBankEntry[];
+  path: string;
+}
+
+export interface QuestionBankGenerateStatus {
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  concepts_total: number;
+  concepts_done: number;
+  questions: number | null;
+  concepts: number | null;
+  path: string | null;
+  error: string | null;
+  started_at: string | null;
 }

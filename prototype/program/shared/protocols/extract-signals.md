@@ -23,6 +23,10 @@ The learner's self-declared difficulty rating for this question, **only if state
 ### correct
 Whether the learner's final answer is substantively correct.
 
+**Grade-answer exchange** (Teacher response opens with `Correct.` or `Not quite.`):
+- `"yes"` if the response opens with `Correct.` or the JSON trailer has `"correct": "yes"`.
+- `"no"` if the response opens with `Not quite.` or the JSON trailer has `"correct": "no"`.
+
 **Multi-turn Socratic exchange** (Teacher turns present in the transcript):
 - `"yes"` if the Teacher explicitly confirmed correctness.
 - `"no"` if the Teacher closed without confirming, the learner gave up, or

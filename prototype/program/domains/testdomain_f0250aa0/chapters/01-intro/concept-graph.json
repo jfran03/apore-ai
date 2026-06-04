@@ -1,0 +1,11 @@
+{
+  "nodes": [
+    {
+      "id": "sample_concept",
+      "label": "Sample Concept",
+      "source_file": "sample.md",
+      "depth": 0
+    }
+  ],
+  "edges": []
+}

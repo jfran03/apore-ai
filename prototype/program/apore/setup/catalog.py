@@ -9,6 +9,18 @@ from apore.fixtures.loader import load_manifest
 from apore.knowledge.chapter import find_chapter_with_graph
 
 
+def _question_bank_status(chapter_root: Path) -> dict:
+    bank_path = chapter_root / "question-bank.json"
+    if not bank_path.is_file():
+        return {"has_question_bank": False, "question_bank_count": 0}
+    try:
+        raw = json.loads(bank_path.read_text(encoding="utf-8"))
+        count = len(raw.get("questions") or [])
+    except (json.JSONDecodeError, OSError):
+        count = 0
+    return {"has_question_bank": count > 0, "question_bank_count": count}
+
+
 def _chapter_status(chapter_root: Path) -> dict:
     sources = chapter_root / "sources"
     graph = chapter_root / "concept-graph.json"
@@ -23,6 +35,7 @@ def _chapter_status(chapter_root: Path) -> dict:
         "source_files": source_files,
         "has_concept_graph": graph.is_file(),
         "wiki_count": wiki_count,
+        **_question_bank_status(chapter_root),
     }
 
 
@@ -31,11 +44,14 @@ def list_knowledge(program_root: Path) -> dict:
     fixtures = []
     for name, spec in manifest.get("fixtures", {}).items():
         target = program_root / spec["target"]
+        domain_id = spec.get("domain_id", "discrete-math")
+        chapter_id = spec.get("chapter_id", "01-set-theory")
         chapter_root = find_chapter_with_graph(target) if target.exists() else None
         fixtures.append(
             {
                 "name": name,
-                "knowledge_source": f"fixture:{name}",
+                "knowledge_source": f"domain:{domain_id}/{chapter_id}",
+                "domain_id": domain_id,
                 "description": spec.get("description", ""),
                 "commit": spec.get("commit", ""),
                 "fetched": target.exists(),
@@ -47,7 +63,7 @@ def list_knowledge(program_root: Path) -> dict:
     domains_root = program_root / "domains"
     if domains_root.is_dir():
         for domain_path in sorted(domains_root.iterdir()):
-            if not domain_path.is_dir():
+            if not domain_path.is_dir() or domain_path.name.startswith("_"):
                 continue
             chapters_dir = domain_path / "chapters"
             if not chapters_dir.is_dir():

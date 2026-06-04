@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apore.fixtures.aliases import fixture_to_domain_chapter
+
 
 @dataclass(frozen=True)
 class ConceptNode:
@@ -68,6 +70,10 @@ class ChapterContext:
     def sources_dir(self) -> Path:
         return self.chapter_root / "sources"
 
+    @property
+    def question_bank_path(self) -> Path:
+        return self.chapter_root / "question-bank.json"
+
 
 def _humanize_id(concept_id: str) -> str:
     text = concept_id.replace("_", " ").replace("-", " ")
@@ -103,18 +109,14 @@ def resolve_chapter(knowledge_source: str, program_root: Path) -> ChapterContext
     kind, primary, secondary = _parse_knowledge_source(knowledge_source)
 
     if kind == "fixture":
-        fixture_root = program_root / ".fixtures" / primary
-        chapter_root = find_chapter_with_graph(fixture_root)
-        if chapter_root is None:
+        mapped = fixture_to_domain_chapter(primary)
+        if mapped is None:
             raise FileNotFoundError(
-                f"No concept-graph.json under fixture {primary!r} at {fixture_root}. "
-                "Run fetch_fixture or POST /setup/fixtures/{name}/fetch."
+                f"Unknown fixture {primary!r}. "
+                "Run POST /setup/fixtures/{name}/fetch for supported upstream templates."
             )
-        return ChapterContext(
-            knowledge_source=knowledge_source,
-            chapter_root=chapter_root,
-            display_name=f"{primary} / {chapter_root.name}",
-        )
+        domain_id, chapter_id = mapped
+        return resolve_chapter(f"domain:{domain_id}/{chapter_id}", program_root)
 
     assert secondary is not None
     chapter_root = program_root / "domains" / primary / "chapters" / secondary
@@ -153,6 +155,7 @@ def select_next_concept(
     requested_id: str | None = None,
     mastery: dict[str, float] | None = None,
     scalar: float = 0.5,
+    weak_only: bool = False,
 ) -> str:
     """Pick the next concept id for question generation."""
     mastery = mastery or {}
@@ -167,7 +170,12 @@ def select_next_concept(
         for n in graph.nodes.values()
         if mastery.get(n.id, 0.0) < 0.7
     ]
-    pool = uncovered or list(graph.nodes.values())
+    if weak_only:
+        pool = uncovered
+    else:
+        pool = uncovered or list(graph.nodes.values())
+    if not pool:
+        return requested_id or "unknown"
     pool.sort(key=lambda n: (n.depth, n.id))
     return pool[0].id
 

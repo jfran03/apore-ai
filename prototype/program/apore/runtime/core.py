@@ -18,12 +18,34 @@ from apore.knowledge.chapter import (
 from apore.providers.base import Provider
 from apore.runtime import state
 from apore.runtime.context import assemble_prompt
+from apore.runtime.question_bank import (
+    QuestionBankExhaustedError,
+    format_question_block,
+    load_question_bank,
+    select_question,
+)
 from apore.runtime.reward import Correct, QuestionSignals, Rating, compute_reward, update_difficulty
+
+_DEFAULT_SIGNALS: dict[str, object] = {
+    "explicit_rating": "ok",
+    "correct": "no",
+    "hint_count": 0,
+    "turn_count": 0,
+    "hedging_count": 0,
+}
+
+_EXTRACT_SIGNALS_CLOSING = (
+    "The question–answer exchange above is complete. "
+    "Switch to extract-signals mode now. "
+    "Reply with ONLY one JSON object matching the extract-signals schema. "
+    "No prose, markdown fences, or teacher dialogue."
+)
 
 
 @dataclass
 class GeneratedQuestion:
     question_number: int
+    question_id: str
     concept_id: str
     concept_label: str
     question_type: str
@@ -35,6 +57,18 @@ class GeneratedQuestion:
     def concept(self) -> str:
         """Human-readable concept label (logging / backward compat)."""
         return self.concept_label
+
+
+@dataclass
+class TutorTurnResult:
+    tutor_message: str
+    question_closed: bool
+
+
+@dataclass
+class GradeAnswerTurnResult:
+    tutor_message: str
+    correct: bool
 
 
 @dataclass
@@ -158,12 +192,42 @@ def _parse_question_block(raw: str) -> tuple[str, str, float, str]:
     return _parse_question_block_protocol(text)
 
 
+def _find_json_object(text: str) -> str | None:
+    """Return the first balanced {...} substring that parses as JSON."""
+    for start in (i for i, ch in enumerate(text) if ch == "{"):
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start : i + 1]
+                    try:
+                        json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break
+                    return candidate
+    return None
+
+
 def _parse_signals(raw: str) -> dict:
     """Extract JSON object from extract-signals response."""
-    match = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    return json.loads(raw.strip())
+    stripped = _strip_code_fence((raw or "").strip())
+    if not stripped:
+        return dict(_DEFAULT_SIGNALS)
+
+    for candidate in (stripped, _find_json_object(stripped)):
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+
+    return dict(_DEFAULT_SIGNALS)
 
 
 def _signals_inconsistency(explicit_rating: str, hint_count: int, turn_count: int) -> tuple[bool, str | None]:
@@ -173,6 +237,138 @@ def _signals_inconsistency(explicit_rating: str, hint_count: int, turn_count: in
             f"Learner rated easy but required {hint_count} hints and {turn_count} turns."
         )
     return False, None
+
+
+_TUTOR_CLOSE_PATTERN = re.compile(r"Yes, exactly\s*[—\-]", re.IGNORECASE)
+
+_GRADE_CORRECT_PATTERN = re.compile(r"^Correct\.", re.IGNORECASE | re.MULTILINE)
+_GRADE_INCORRECT_PATTERN = re.compile(r"^Not quite\.", re.IGNORECASE | re.MULTILINE)
+
+_SKIP_PROMPT = (
+    "Before we move on — briefly, why do you want to skip this question?"
+)
+
+
+def seed_dialogue_transcript(question: GeneratedQuestion) -> list[dict[str, str]]:
+    """Initial assistant turn: the generated question block."""
+    return [{"role": "assistant", "content": question.gen_response}]
+
+
+def parse_tutor_response(raw: str) -> tuple[str, bool]:
+    """Strip optional JSON trailer and detect question closure."""
+    text = _strip_code_fence((raw or "").strip())
+    question_closed = bool(_TUTOR_CLOSE_PATTERN.search(text))
+
+    json_obj = _find_json_object(text)
+    if json_obj:
+        try:
+            parsed = json.loads(json_obj)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict) and parsed.get("question_closed"):
+            question_closed = True
+            text = text.replace(json_obj, "").strip()
+
+    return text.strip(), question_closed
+
+
+def parse_grade_answer_response(raw: str) -> tuple[str, bool]:
+    """Strip JSON trailer and determine correctness from grade-answer response."""
+    text = _strip_code_fence((raw or "").strip())
+    correct = bool(_GRADE_CORRECT_PATTERN.search(text))
+
+    json_obj = _find_json_object(text)
+    if json_obj:
+        try:
+            parsed = json.loads(json_obj)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            trailer_correct = parsed.get("correct")
+            if trailer_correct in ("yes", "no"):
+                correct = trailer_correct == "yes"
+            text = text.replace(json_obj, "").strip()
+
+    if _GRADE_INCORRECT_PATTERN.search(text):
+        correct = False
+
+    return text.strip(), correct
+
+
+def skip_prompt_message() -> str:
+    return _SKIP_PROMPT
+
+
+def tutor_turn(
+    *,
+    question: GeneratedQuestion,
+    dialogue_transcript: list[dict[str, str]],
+    learner_message: str,
+    chapter: ChapterContext,
+    state_path: Path,
+    provider: Provider,
+    model: str,
+    config: dict,
+    program_root: Path,
+) -> TutorTurnResult:
+    """Run one Socratic tutor turn for the learner's latest message."""
+    graph = load_concept_graph(chapter)
+    wiki_paths = get_wiki_paths(chapter, question.concept_id, graph)
+    assembled = assemble_prompt(
+        "tutor-turn",
+        state_path,
+        concept_id=question.concept_id,
+        chapter=chapter,
+        graph=graph,
+        wiki_paths=wiki_paths,
+        program_root=program_root,
+    )
+    messages = list(assembled["messages"]) + list(dialogue_transcript)
+    messages.append({"role": "user", "content": learner_message.strip()})
+    raw = provider.invoke(
+        assembled["system"],
+        messages,
+        model,
+        {**config, "protocol": "tutor-turn"},
+    )
+    tutor_message, question_closed = parse_tutor_response(raw)
+    return TutorTurnResult(tutor_message=tutor_message, question_closed=question_closed)
+
+
+def grade_answer_turn(
+    *,
+    question: GeneratedQuestion,
+    dialogue_transcript: list[dict[str, str]],
+    learner_message: str,
+    chapter: ChapterContext,
+    state_path: Path,
+    provider: Provider,
+    model: str,
+    config: dict,
+    program_root: Path,
+) -> GradeAnswerTurnResult:
+    """Grade a learner answer attempt: verdict first, then explanation; always closes."""
+    graph = load_concept_graph(chapter)
+    wiki_paths = get_wiki_paths(chapter, question.concept_id, graph)
+    assembled = assemble_prompt(
+        "grade-answer",
+        state_path,
+        concept_id=question.concept_id,
+        chapter=chapter,
+        graph=graph,
+        wiki_paths=wiki_paths,
+        program_root=program_root,
+    )
+    messages = list(assembled["messages"]) + list(dialogue_transcript)
+    messages.append({"role": "user", "content": learner_message.strip()})
+    raw = provider.invoke(
+        assembled["system"],
+        messages,
+        model,
+        {**config, "protocol": "grade-answer"},
+    )
+    tutor_message, correct = parse_grade_answer_response(raw)
+    return GradeAnswerTurnResult(tutor_message=tutor_message, correct=correct)
 
 
 def _build_grade_messages(
@@ -202,12 +398,51 @@ def generate_question(
     metadata: dict,
     program_root: Path,
     mastery: dict[str, float] | None = None,
+    asked_ids: set[str] | None = None,
+    focus_mode: str = "adaptive",
+    last_concept_id: str | None = None,
 ) -> GeneratedQuestion:
-    """Generate a question via LLM only (no grading or state log)."""
+    """Select from question bank when present; otherwise fall back to LLM generation."""
     graph = load_concept_graph(chapter)
     scalar = state.read_scalar(state_path)
+    mastery_map = mastery if mastery is not None else state.read_mastery(state_path)
+    asked = asked_ids if asked_ids is not None else state.read_asked_ids(state_path)
+    bank = load_question_bank(chapter)
+
+    if bank is not None and bank.questions:
+        entry = select_question(
+            bank=bank,
+            graph=graph,
+            concept_id=concept_id,
+            scalar=scalar,
+            asked_ids=asked,
+            question_number=question_number,
+            mastery=mastery_map,
+            requested_concept_id=concept_id,
+            focus_mode=focus_mode,
+            last_concept_id=last_concept_id,
+        )
+        gen_response = format_question_block(entry, graph)
+        concept_label = graph.label_for(entry.concept_id)
+        return GeneratedQuestion(
+            question_number=question_number,
+            question_id=entry.id,
+            concept_id=entry.concept_id,
+            concept_label=concept_label,
+            question_type=entry.type,
+            intended_difficulty=entry.intended_difficulty,
+            question_text=entry.text,
+            gen_response=gen_response,
+        )
+
+    metadata["question_bank_fallback"] = True
+    weak_only = focus_mode == "weak_points"
     selected_id = select_next_concept(
-        graph, requested_id=concept_id, mastery=mastery, scalar=scalar
+        graph,
+        requested_id=concept_id,
+        mastery=mastery_map,
+        scalar=scalar,
+        weak_only=weak_only,
     )
     wiki_paths = get_wiki_paths(chapter, selected_id, graph)
 
@@ -233,8 +468,10 @@ def generate_question(
         metadata["concept_mismatch"] = {"expected": selected_id, "parsed": parsed_concept}
 
     concept_label = graph.label_for(selected_id)
+    ephemeral_id = f"ephemeral:{session_id}:{question_number}"
     return GeneratedQuestion(
         question_number=question_number,
+        question_id=ephemeral_id,
         concept_id=selected_id,
         concept_label=concept_label,
         question_type=question_type,
@@ -270,6 +507,7 @@ def assess_response(
     )
     transcript = _build_grade_messages(question, learner_response, dialogue_transcript)
     messages = list(assembled["messages"]) + transcript
+    messages.append({"role": "user", "content": _EXTRACT_SIGNALS_CLOSING})
     extract_response = provider.invoke(
         assembled["system"],
         messages,
@@ -326,6 +564,7 @@ def finalize_turn(
             "Q#": question.question_number,
             "session": session_id,
             "date": datetime.now(timezone.utc).date().isoformat(),
+            "question_id": question.question_id,
             "concept": question.concept_id,
             "question_type": question.question_type,
             "intended_difficulty": question.intended_difficulty,
@@ -339,6 +578,14 @@ def finalize_turn(
         },
     )
     state.write_scalar(state_path, new_difficulty)
+
+    mastery = state.read_mastery(state_path)
+    current = mastery.get(question.concept_id, 0.0)
+    if assessment.correct == "yes":
+        mastery[question.concept_id] = min(1.0, current + 0.15)
+    else:
+        mastery[question.concept_id] = max(0.0, current - 0.1)
+    state.write_mastery(state_path, mastery)
 
     return GradingResult(
         question_number=question.question_number,
@@ -403,8 +650,9 @@ def run_question_cycle(
     config: dict,
     metadata: dict,
     program_root: Path,
+    explicit_rating: Rating | None = None,
 ) -> QuestionResult:
-    """Generate a question, grade the learner response, update state (sim harness)."""
+    """Generate a question, run multi-turn dialogue, grade, update state (sim harness)."""
     generated = generate_question(
         session_id=session_id,
         question_number=question_number,
@@ -417,10 +665,45 @@ def run_question_cycle(
         metadata=metadata,
         program_root=program_root,
     )
+    transcript = seed_dialogue_transcript(generated)
+    turn = tutor_turn(
+        question=generated,
+        dialogue_transcript=transcript,
+        learner_message=learner_response,
+        chapter=chapter,
+        state_path=state_path,
+        provider=provider,
+        model=model,
+        config=config,
+        program_root=program_root,
+    )
+    transcript.append({"role": "user", "content": learner_response.strip()})
+    transcript.append({"role": "assistant", "content": turn.tutor_message})
+
+    if not turn.question_closed:
+        follow_up = "I think the union of the sets is empty."
+        turn2 = tutor_turn(
+            question=generated,
+            dialogue_transcript=transcript,
+            learner_message=follow_up,
+            chapter=chapter,
+            state_path=state_path,
+            provider=provider,
+            model=model,
+            config=config,
+            program_root=program_root,
+        )
+        transcript.append({"role": "user", "content": follow_up})
+        transcript.append({"role": "assistant", "content": turn2.tutor_message})
+
+    last_user = next(
+        (m["content"] for m in reversed(transcript) if m["role"] == "user"),
+        learner_response,
+    )
     grading = grade_response(
         session_id=session_id,
         question=generated,
-        learner_response=learner_response,
+        learner_response=last_user,
         chapter=chapter,
         state_path=state_path,
         provider=provider,
@@ -428,6 +711,8 @@ def run_question_cycle(
         config=config,
         metadata=metadata,
         program_root=program_root,
+        explicit_rating=explicit_rating,
+        dialogue_transcript=transcript,
     )
     return QuestionResult(
         session_id=session_id,
@@ -436,7 +721,7 @@ def run_question_cycle(
         question_type=generated.question_type,
         intended_difficulty=generated.intended_difficulty,
         question_text=generated.question_text,
-        learner_response=learner_response,
+        learner_response=last_user,
         explicit_rating=grading.explicit_rating,
         correct=grading.correct,
         hint_count=grading.hint_count,

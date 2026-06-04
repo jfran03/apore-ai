@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_ID_RE = re.compile(r"^[a-z0-9_][a-z0-9_-]*$")
 
 
 def validate_id(value: str, field: str) -> str:

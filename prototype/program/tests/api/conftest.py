@@ -19,6 +19,10 @@ def ensure_test_chapter():
     dest = app_module.PROGRAM_ROOT / "domains" / "_pytest" / "chapters" / "01-intro"
     if not dest.exists():
         shutil.copytree(src, dest)
+    bank_src = src / "question-bank.json"
+    bank_dest = dest / "question-bank.json"
+    if bank_src.is_file() and not bank_dest.is_file():
+        shutil.copy2(bank_src, bank_dest)
     yield
 
 

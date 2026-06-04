@@ -35,4 +35,5 @@ class NIMProvider(Provider):
             messages=all_messages,
             max_tokens=config.get("max_tokens", 1024),
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        return content if content is not None else ""

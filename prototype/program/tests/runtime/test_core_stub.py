@@ -8,7 +8,17 @@ from pathlib import Path
 from apore.knowledge.chapter import resolve_chapter
 from apore.providers.stub import StubProvider
 from apore.runtime import state
-from apore.runtime.core import QuestionResult, run_question_cycle, _parse_question_block
+from apore.runtime.core import (
+    AssessmentResult,
+    GeneratedQuestion,
+    QuestionResult,
+    finalize_turn,
+    generate_question,
+    run_question_cycle,
+    _parse_question_block,
+)
+
+_PROGRAM_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +67,13 @@ def _make_program_root(tmp_path: Path) -> Path:
     (root / "shared" / "protocols" / "extract-signals.md").write_text(
         "# Protocol: extract-signals\nExtract instructions.", encoding="utf-8"
     )
+    src_protocols = _PROGRAM_ROOT / "shared" / "protocols"
+    for name in ("tutor-turn.md", "grade-answer.md"):
+        src = src_protocols / name
+        if src.is_file():
+            (root / "shared" / "protocols" / name).write_text(
+                src.read_text(encoding="utf-8"), encoding="utf-8"
+            )
 
     import json
 
@@ -167,7 +184,8 @@ def test_learner_response_preserved(tmp_path: Path):
     state.initialize(state_path)
     answer = "My answer here."
     result = _run_cycle(tmp_path, state_path, learner_response=answer)
-    assert result.learner_response == answer
+    # Sim harness runs a follow-up turn when the stub tutor has not closed the question.
+    assert result.learner_response == "I think the union of the sets is empty."
 
 
 def test_signals_from_stub(tmp_path: Path):
@@ -177,7 +195,7 @@ def test_signals_from_stub(tmp_path: Path):
     assert result.explicit_rating == "ok"
     assert result.correct == "yes"
     assert result.hint_count == 1
-    assert result.turn_count == 3
+    assert result.turn_count == 2
     assert result.hedging_count == 0
 
 
@@ -306,3 +324,59 @@ def test_three_cycles_metadata_in_all_results(tmp_path: Path):
         assert "fixture_commit" in r.metadata
         assert "provider" in r.metadata
         assert "model" in r.metadata
+
+
+def test_generate_question_from_bank_not_ephemeral(tmp_path: Path):
+    """Pytest chapter has question-bank.json; selection must not use LLM fallback."""
+    state_path = tmp_path / "learner-state.md"
+    state.initialize(state_path)
+    chapter = resolve_chapter("domain:_pytest/01-intro", _PROGRAM_ROOT)
+    metadata: dict = {}
+    generated = generate_question(
+        session_id="bank-test",
+        question_number=1,
+        chapter=chapter,
+        concept_id=None,
+        state_path=state_path,
+        provider=StubProvider(),
+        model="stub-model",
+        config={},
+        metadata=metadata,
+        program_root=_PROGRAM_ROOT,
+        asked_ids=set(),
+    )
+    assert not generated.question_id.startswith("ephemeral:")
+    assert metadata.get("question_bank_fallback") is not True
+    assert generated.question_text
+
+
+def test_finalize_turn_updates_mastery(tmp_path: Path):
+    state_path = tmp_path / "learner-state.md"
+    state.initialize(state_path)
+    question = GeneratedQuestion(
+        question_number=1,
+        question_id="q-1",
+        concept_id="sets_definition",
+        concept_label="Definition of a Set",
+        question_type="recall",
+        intended_difficulty=0.5,
+        question_text="What is a set?",
+        gen_response="",
+    )
+    assessment = AssessmentResult(
+        correct="yes",
+        hint_count=0,
+        turn_count=1,
+        hedging_count=0,
+        llm_explicit_rating="ok",
+        llm_inconsistency=False,
+        flag_reason=None,
+    )
+    finalize_turn(
+        session_id="sess-1",
+        question=question,
+        assessment=assessment,
+        explicit_rating="ok",
+        state_path=state_path,
+    )
+    assert state.read_mastery(state_path)["sets_definition"] == pytest.approx(0.15)

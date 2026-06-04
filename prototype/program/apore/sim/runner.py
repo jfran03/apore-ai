@@ -31,6 +31,9 @@ def _make_minimal_program_root(tmp_path: Path) -> Path:
     (root / "shared" / "protocols" / "extract-signals.md").write_text(
         "# Protocol: extract-signals\nExtract signals.", encoding="utf-8"
     )
+    (root / "shared" / "protocols" / "tutor-turn.md").write_text(
+        "# Protocol: tutor-turn\nSocratic tutor turn.", encoding="utf-8"
+    )
 
     chapter = root / "domains" / "_sim" / "chapters" / "01-intro"
     chapter.mkdir(parents=True)
@@ -91,7 +94,7 @@ def run_sessions(
             kb_source = knowledge_source or "domain:_sim/01-intro"
         else:
             prog_root = program_root
-            kb_source = knowledge_source or f"fixture:{fixture_name}"
+            kb_source = knowledge_source or "domain:discrete-math/01-set-theory"
 
         chapter = resolve_chapter(kb_source, prog_root)
 

@@ -51,12 +51,12 @@ export function Setup() {
     setMessage(null);
     try {
       const result = await fetchFixture('apore-lite');
-      const source = 'fixture:apore-lite';
+      const source = result.knowledge_source ?? 'domain:discrete-math/01-set-theory';
       setKnowledgeSource(source);
       setStoredKnowledgeSource(source);
 
       const parts = [
-        result.status === 'fetched' ? 'Downloaded apore-lite' : 'apore-lite already on disk',
+        result.status === 'fetched' ? 'Synced discrete-math from apore-lite' : 'Sync complete',
         `@ ${result.commit.slice(0, 12)}`,
       ];
       if (result.chapter_ready) {
@@ -154,23 +154,11 @@ export function Setup() {
         <h2 id="setup-knowledge-heading" className="setup-section__heading">
           Knowledge source for Study
         </h2>
+        <p className="setup-meta">
+          Optional default for the Study page. Domain and chapter are chosen when you start a
+          session on Study — saving here only pre-fills those choices.
+        </p>
         <div className="setup-radio" role="radiogroup" aria-label="Knowledge source">
-          {catalog?.fixtures.map((f) => (
-            <label key={f.knowledge_source}>
-              <input
-                type="radio"
-                name="knowledge"
-                value={f.knowledge_source}
-                checked={knowledgeSource === f.knowledge_source}
-                onChange={() => setKnowledgeSource(f.knowledge_source)}
-              />
-              <span>
-                Fixture: {f.name}
-                {f.fetched ? ' (on disk)' : ' (not fetched)'}
-                {f.chapter_ready ? ' — graph ready' : ''}
-              </span>
-            </label>
-          ))}
           {catalog?.domains.map((d) =>
             d.chapters.map((c) => (
               <label key={c.knowledge_source}>

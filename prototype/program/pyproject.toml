@@ -10,6 +10,8 @@ dependencies = [
   "anthropic>=0.40.0",
   "openai>=1.55.0",
   "pydantic>=2.10.0",
+  "markitdown>=0.1.0",
+  "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,62 @@
+@import './tokens.css';
+
+/* Font face fallback declarations (CursorGothic/JetBrains Mono are not system fonts) */
+/* In production, host the actual font files and uncomment @font-face blocks here. */
+/* @font-face {
+  font-family: 'CursorGothic';
+  src: url('/fonts/CursorGothic.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+} */
+
+/* Body reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-body);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body-md);
+  line-height: 1.5;
+  min-height: 100dvh;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+/* Mono citations */
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-code);
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--color-primary-active);
+  text-decoration: underline;
+}
+
+button,
+[role='button'] {
+  cursor: pointer;
+}

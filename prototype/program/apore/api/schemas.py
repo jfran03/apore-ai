@@ -2,35 +2,64 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class CreateSessionRequest(BaseModel):
     knowledge_source: str = Field(
-        default="fixture:apore-lite",
-        description="fixture:name or domain:domain_id/chapter_id",
+        default="domain:discrete-math/01-set-theory",
+        description="domain:domain_id/chapter_id (fixture:name aliases supported)",
     )
     fixture: str | None = Field(
         default=None,
         description="Deprecated: use knowledge_source=fixture:{name}",
     )
+    focus_mode: str = Field(
+        default="adaptive",
+        description='Question selection strategy: "adaptive" or "weak_points"',
+    )
+    max_questions: int = Field(default=10, ge=1, le=50)
 
 
 class CreateSessionResponse(BaseModel):
     session_id: str
+    title: str
     scalar: float
     created_at: str
     knowledge_source: str
+    focus_mode: str
+    max_questions: int
 
 
 class TurnRequest(BaseModel):
-    learner_response: str | None = None
+    learner_message: str | None = Field(
+        default=None,
+        description="Learner message during Socratic dialogue",
+    )
+    learner_response: str | None = Field(
+        default=None,
+        description="Deprecated alias for learner_message",
+    )
     concept_id: str | None = None
+    skip: bool = Field(default=False, description="Request to skip the current question")
+    skip_reason: str | None = Field(
+        default=None,
+        description="Explanation after skip prompt",
+    )
     explicit_rating: str | None = None
+    continue_to_next: bool = Field(
+        default=False,
+        alias="continue",
+        description="Leave post-rating reflection and advance to the next question",
+    )
     correct: str | None = Field(
         default=None,
         description="Deprecated; correctness is LLM-assessed on the grade step",
     )
+
+    model_config = {"populate_by_name": True}
 
 
 class QuestionRequest(BaseModel):
@@ -42,6 +71,7 @@ class QuestionRequest(BaseModel):
 
 class QuestionResponse(BaseModel):
     question_number: int
+    question_id: str
     concept_id: str
     concept_label: str
     concept: str
@@ -51,11 +81,20 @@ class QuestionResponse(BaseModel):
 
 
 class TurnResponse(BaseModel):
-    phase: str = Field(description='"graded" after answer LLM check; "completed" after difficulty rating')
+    phase: str = Field(
+        description=(
+            '"dialogue" tutor reply; "skip_prompt" awaiting skip reason; '
+            '"graded" after assessment; "reflection" after difficulty rating '
+            '(optional follow-up chat); "completed" after leaving reflection; '
+            '"session_complete" when max_questions reached'
+        )
+    )
     question_number: int
-    correct: str
-    hint_count: int
-    turn_count: int
+    tutor_message: str | None = None
+    question_closed: bool = False
+    correct: str = "no"
+    hint_count: int = 0
+    turn_count: int = 0
     hedging_count: int = 0
     explicit_rating: str | None = None
     reward: float | None = None
@@ -66,10 +105,14 @@ class TurnResponse(BaseModel):
 
 class SessionStateResponse(BaseModel):
     session_id: str
+    title: str
     scalar: float
     question_count: int
     mastery: dict[str, float]
     knowledge_source: str
+    focus_mode: str
+    max_questions: int
+    questions_remaining: int
     active_concept_id: str | None = None
 
 
@@ -122,6 +165,7 @@ class FixtureFetchResponse(BaseModel):
     name: str
     commit: str
     path: str
+    knowledge_source: str
     status: str
     chapter_ready: bool = False
     chapter_path: str | None = None
@@ -137,3 +181,37 @@ class StubCompileResponse(BaseModel):
 
 class UploadSourcesResponse(BaseModel):
     uploaded: list[str]
+
+
+class QuestionBankEntry(BaseModel):
+    id: str
+    concept_id: str
+    type: str
+    intended_difficulty: float = Field(ge=0.1, le=0.9)
+    text: str
+
+
+class QuestionBankEntryView(QuestionBankEntry):
+    depth: int
+
+
+class QuestionBankResponse(BaseModel):
+    version: int
+    questions: list[QuestionBankEntryView]
+    path: str
+
+
+class QuestionBankReplaceRequest(BaseModel):
+    version: int = 1
+    questions: list[QuestionBankEntry]
+
+
+class QuestionBankGenerateStatus(BaseModel):
+    status: Literal["idle", "running", "completed", "failed"]
+    concepts_total: int = 0
+    concepts_done: int = 0
+    questions: int | None = None
+    concepts: int | None = None
+    path: str | None = None
+    error: str | None = None
+    started_at: str | None = None

@@ -7,10 +7,14 @@ from pathlib import Path
 
 from apore.runtime.paths import get_program_root
 from apore.runtime.state import (
+    append_asked_id,
     append_log_row,
     initialize,
+    read_asked_ids,
     read_mastery,
     read_scalar,
+    read_session_meta,
+    read_title,
     write_mastery,
     write_scalar,
 )
@@ -49,6 +53,26 @@ def test_initialize_empty_mastery(tmp_path: Path):
     p = tmp_path / "learner-state.md"
     initialize(p)
     assert read_mastery(p) == {}
+
+
+def test_initialize_with_session_metadata(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    initialize(
+        p,
+        title="Set Theory Basics",
+        session_id="abc-123",
+        created_at="2026-06-03T12:00:00+00:00",
+        knowledge_source="domain:discrete-math/01-set-theory",
+        focus_mode="weak_points",
+        max_questions=5,
+    )
+    assert read_title(p) == "Set Theory Basics"
+    meta = read_session_meta(p)
+    assert meta["id"] == "abc-123"
+    assert meta["knowledge_source"] == "domain:discrete-math/01-set-theory"
+    assert meta["focus_mode"] == "weak_points"
+    assert meta["max_questions"] == "5"
+    assert read_scalar(p) == pytest.approx(0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -174,3 +198,14 @@ def test_append_preserves_scalar_and_mastery(tmp_path: Path):
     append_log_row(p, _sample_row(1))
     assert read_scalar(p) == pytest.approx(0.55)
     assert read_mastery(p)["concept-a"] == pytest.approx(0.7)
+
+
+def test_asked_ids_roundtrip(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    initialize(p)
+    assert read_asked_ids(p) == set()
+    append_asked_id(p, "sets_definition-recall-01")
+    append_asked_id(p, "sets_definition-apply-01")
+    assert read_asked_ids(p) == {"sets_definition-recall-01", "sets_definition-apply-01"}
+    append_asked_id(p, "sets_definition-recall-01")
+    assert read_asked_ids(p) == {"sets_definition-recall-01", "sets_definition-apply-01"}

@@ -57,6 +57,14 @@ def _make_program_root(root: Path) -> Path:
     (root / "shared" / "protocols" / "extract-signals.md").write_text(
         "# Protocol: extract-signals\nExtract instructions.", encoding="utf-8"
     )
+    from pathlib import Path as _Path
+
+    _program = _Path(__file__).resolve().parents[2]
+    tutor_src = _program / "shared" / "protocols" / "tutor-turn.md"
+    if tutor_src.is_file():
+        (root / "shared" / "protocols" / "tutor-turn.md").write_text(
+            tutor_src.read_text(encoding="utf-8"), encoding="utf-8"
+        )
     chapter = root / "domains" / "_sim" / "chapters" / "01-intro"
     chapter.mkdir(parents=True)
     graph = {

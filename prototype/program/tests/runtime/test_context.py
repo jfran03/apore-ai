@@ -22,6 +22,10 @@ def _make_fixture(tmp_path: Path) -> tuple[Path, Path, Path, ChapterContext, Con
     (root / "shared" / "protocols" / "extract-signals.md").write_text(
         "# Protocol: extract-signals\nExtract instructions here.", encoding="utf-8"
     )
+    (root / "shared" / "protocols" / "generate-question-bank.md").write_text(
+        "# Protocol: generate-question-bank\nBank generation instructions here.",
+        encoding="utf-8",
+    )
 
     chapter_root = root / "domains" / "t" / "chapters" / "01"
     wiki_dir = chapter_root / "wiki"
@@ -105,3 +109,9 @@ def test_invalid_protocol_raises_value_error(tmp_path: Path):
     root, wiki, state, chapter, graph = _make_fixture(tmp_path)
     with pytest.raises(ValueError, match="Unknown protocol"):
         _assemble("unknown-protocol", root, wiki, state, chapter, graph)
+
+
+def test_generate_question_bank_protocol(tmp_path: Path):
+    root, wiki, state, chapter, graph = _make_fixture(tmp_path)
+    result = _assemble("generate-question-bank", root, wiki, state, chapter, graph)
+    assert "generate-question-bank" in result["messages"][0]["content"]

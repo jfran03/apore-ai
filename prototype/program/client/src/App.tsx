@@ -5,6 +5,7 @@ import { Home } from './pages/Home';
 import { Study } from './pages/Study';
 import { Setup } from './pages/Setup';
 import { Settings } from './pages/Settings';
+import { Questions } from './pages/Questions';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -16,6 +17,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/setup" element={<Setup />} />
+          <Route path="/questions" element={<Questions />} />
           <Route path="/study" element={<Study />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/runs" element={<PlaceholderPage title="Runs" note="Run history — coming soon." />} />

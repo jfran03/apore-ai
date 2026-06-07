@@ -8,7 +8,13 @@ from apore.knowledge.chapter import ChapterContext, ConceptGraph
 from apore.runtime.grounding import build_grounding_slice
 from apore.runtime.paths import get_program_root
 
-_VALID_PROTOCOLS = {"generate-question", "extract-signals"}
+_VALID_PROTOCOLS = {
+    "generate-question",
+    "generate-question-bank",
+    "extract-signals",
+    "tutor-turn",
+    "grade-answer",
+}
 
 
 def assemble_prompt(

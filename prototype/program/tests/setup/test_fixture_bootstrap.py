@@ -1,4 +1,4 @@
-"""Fixture bootstrap builds concept-graph from apore-lite-style wiki layout."""
+"""Upstream sync bootstrap builds concept-graph from apore-lite-style wiki layout."""
 
 from pathlib import Path
 
@@ -7,20 +7,21 @@ from apore.setup.stub_compile import bootstrap_chapter_from_wiki, find_fixture_c
 
 
 def test_bootstrap_chapter_from_wiki(tmp_path: Path) -> None:
-    fixture_root = tmp_path / ".fixtures" / "apore-lite"
-    chapter = fixture_root / "discrete-math" / "chapters" / "01-set-theory"
+    domain_root = tmp_path / "domains" / "discrete-math"
+    chapter = domain_root / "chapters" / "01-set-theory"
     wiki = chapter / "wiki"
     wiki.mkdir(parents=True)
     (wiki / "what-is-a-set.md").write_text("# What is a Set\n\nBody.", encoding="utf-8")
     (wiki / "set-operations.md").write_text("# Set Operations\n\nBody.", encoding="utf-8")
 
-    assert find_fixture_chapter_root(fixture_root) == chapter
+    assert find_fixture_chapter_root(domain_root) == chapter
     summary = bootstrap_chapter_from_wiki(chapter)
     assert summary["status"] == "bootstrapped"
     assert summary["nodes"] == 2
-    assert find_chapter_with_graph(fixture_root) == chapter
+    assert find_chapter_with_graph(domain_root) == chapter
 
     ctx = resolve_chapter("fixture:apore-lite", tmp_path)
+    assert ctx.chapter_root == chapter
     graph = load_concept_graph(ctx)
     assert graph.label_for("what_is_a_set") == "What Is A Set"
     assert graph.label_for("set_operations") == "Set Operations"

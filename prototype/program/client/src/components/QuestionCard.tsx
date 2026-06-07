@@ -27,6 +27,7 @@ export function QuestionCard({
   question_number = 1,
 }: QuestionCardProps) {
   const { main, citation } = extractCitation(question_text);
+  const progressLabel = `Question ${question_number}`;
 
   return (
     <AnimatePresence mode="wait">
@@ -39,6 +40,7 @@ export function QuestionCard({
         transition={{ duration: 0.15 }}
       >
         <div className="question-card__meta">
+          <span className="question-card__progress">{progressLabel}</span>
           <span className="question-card__concept" title={concept_id}>
             {concept_label}
           </span>

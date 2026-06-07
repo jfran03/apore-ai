@@ -14,12 +14,15 @@ import type {
   KnowledgeCatalog,
   FixtureFetchResult,
   StubCompileResult,
+  QuestionBankEntry,
+  QuestionBankResponse,
+  QuestionBankGenerateStatus,
 } from './types';
 
 const KNOWLEDGE_SOURCE_KEY = 'apore.knowledge_source';
 
 export function getStoredKnowledgeSource(): string {
-  return localStorage.getItem(KNOWLEDGE_SOURCE_KEY) ?? 'fixture:apore-lite';
+  return localStorage.getItem(KNOWLEDGE_SOURCE_KEY) ?? 'domain:discrete-math/01-set-theory';
 }
 
 export function setStoredKnowledgeSource(source: string): void {
@@ -148,5 +151,86 @@ export async function stubCompileChapter(
   return apiFetch<StubCompileResult>(
     `/setup/domains/${domainId}/chapters/${chapterId}/compile-stub`,
     { method: 'POST' },
+  );
+}
+
+function questionBankBasePath(knowledgeSource: string): string {
+  if (knowledgeSource.startsWith('fixture:')) {
+    if (knowledgeSource === 'fixture:apore-lite') {
+      return '/setup/domains/discrete-math/chapters/01-set-theory/question-bank';
+    }
+    throw new Error(`Unsupported fixture knowledge source: ${knowledgeSource}`);
+  }
+  if (knowledgeSource.startsWith('domain:')) {
+    const rest = knowledgeSource.split(':', 2)[1];
+    const [domainId, chapterId] = rest.split('/', 2);
+    return `/setup/domains/${encodeURIComponent(domainId)}/chapters/${encodeURIComponent(chapterId)}/question-bank`;
+  }
+  throw new Error(`Unsupported knowledge source: ${knowledgeSource}`);
+}
+
+function questionBankGeneratePath(knowledgeSource: string): string {
+  return `${questionBankBasePath(knowledgeSource)}/generate`;
+}
+
+export async function getQuestionBank(
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<QuestionBankResponse> {
+  return apiFetch<QuestionBankResponse>(questionBankBasePath(knowledgeSource));
+}
+
+export async function generateQuestionBank(
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<QuestionBankGenerateStatus> {
+  return apiFetch<QuestionBankGenerateStatus>(
+    questionBankGeneratePath(knowledgeSource),
+    { method: 'POST' },
+  );
+}
+
+export async function getQuestionBankGenerateStatus(
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<QuestionBankGenerateStatus> {
+  return apiFetch<QuestionBankGenerateStatus>(
+    `${questionBankGeneratePath(knowledgeSource)}/status`,
+  );
+}
+
+export async function addQuestionBankEntry(
+  entry: QuestionBankEntry,
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<QuestionBankResponse> {
+  return apiFetch<QuestionBankResponse>(
+    `${questionBankBasePath(knowledgeSource)}/questions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    },
+  );
+}
+
+export async function updateQuestionBankEntry(
+  questionId: string,
+  entry: QuestionBankEntry,
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<QuestionBankResponse> {
+  return apiFetch<QuestionBankResponse>(
+    `${questionBankBasePath(knowledgeSource)}/questions/${encodeURIComponent(questionId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    },
+  );
+}
+
+export async function deleteQuestionBankEntry(
+  questionId: string,
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<QuestionBankResponse> {
+  return apiFetch<QuestionBankResponse>(
+    `${questionBankBasePath(knowledgeSource)}/questions/${encodeURIComponent(questionId)}`,
+    { method: 'DELETE' },
   );
 }

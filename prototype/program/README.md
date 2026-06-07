@@ -68,9 +68,9 @@ cd program
 python -m pytest tests -q
 ```
 
-### Fetch the test fixture (needed for Study with apore-lite)
+### Fetch discrete-math corpus (Study default)
 
-**Setup UI (recommended):** open **Setup** in the client → **Fetch apore-lite**. This clones the pinned corpus, builds `concept-graph.json` from its wiki pages, and saves `fixture:apore-lite` for Study.
+**Setup UI (recommended):** open **Setup** in the client → **Fetch apore-lite**. This syncs the pinned upstream template into `program/domains/discrete-math/` and sets `domain:discrete-math/01-set-theory` for Study.
 
 **CLI (same behavior):**
 
@@ -79,7 +79,7 @@ cd program
 python scripts/fetch_fixture.py
 ```
 
-Requires **Git** on your PATH. The clone lands in `program/.fixtures/apore-lite` (gitignored).
+Requires **Git** on your PATH. During fetch, the upstream repo is cloned into `program/.fixtures/apore-lite`, `discrete-math/` is copied into `domains/discrete-math`, then `.fixtures/` is removed. Nothing under `.fixtures/` remains after a successful fetch.
 
 ## Desktop app (Tauri)
 

@@ -3,8 +3,12 @@
     "apore-lite": {
       "url": "https://github.com/jfran03/apore-lite",
       "commit": "17f4dfa479bea81e740cffbc670ebd8804e9e01b",
-      "target": ".fixtures/apore-lite",
-      "description": "Discrete math reference fixture for testing"
+      "clone_target": ".fixtures/apore-lite",
+      "target": "domains/discrete-math",
+      "upstream_subdir": "discrete-math",
+      "domain_id": "discrete-math",
+      "chapter_id": "01-set-theory",
+      "description": "Discrete math reference corpus (synced from apore-lite template)"
     }
   }
 }

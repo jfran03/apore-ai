@@ -1,0 +1,1843 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Apore Program Preview</title>
+  <style>
+    :root {
+      --primary: #c08532;
+      --primary-active: #a67328;
+      --ink: #f7f7f4;
+      --body: #c8c3b8;
+      --muted: #89847b;
+      --muted-soft: #5f5a53;
+      --hairline: #242424;
+      --hairline-soft: #1b1b1b;
+      --hairline-strong: #3a3935;
+      --canvas: #0d0d0d;
+      --canvas-soft: #121212;
+      --surface-card: #1a1a1a;
+      --surface-strong: #24231f;
+      --on-primary: #ffffff;
+      --timeline-thinking: #6f4738;
+      --timeline-grep: #375c3f;
+      --timeline-read: #334a69;
+      --timeline-edit: #56426e;
+      --timeline-done: #8c5d25;
+      --success: #4eb28e;
+      --error: #e25d7d;
+      --font-sans: Inter, system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .page {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: 42px 1fr;
+    }
+
+    .desktop-titlebar {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--hairline);
+      background: #111111;
+      user-select: none;
+    }
+
+    .titlebar-left,
+    .titlebar-right {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .titlebar-left {
+      gap: 18px;
+    }
+
+    .titlebar-right {
+      gap: 8px;
+    }
+
+    .window-controls {
+      display: flex;
+      align-self: stretch;
+      margin-right: -12px;
+    }
+
+    .window-button {
+      width: 42px;
+      border: 0;
+      border-left: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .window-button:hover {
+      background: var(--surface-strong);
+      color: var(--ink);
+    }
+
+    .window-button.close:hover {
+      background: var(--error);
+      color: var(--on-primary);
+    }
+
+    .menu-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      color: var(--body);
+      font-size: 12px;
+    }
+
+    .menu-bar span {
+      line-height: 1;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .brand-mark {
+      width: 24px;
+      height: 24px;
+      border: 1px solid rgba(192, 133, 50, 0.45);
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: var(--ink);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1;
+      background: #151515;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .button-primary,
+    .button-secondary,
+    .button-ink,
+    .button-ghost {
+      height: 40px;
+      border-radius: 8px;
+      padding: 0 16px;
+      font-size: 14px;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+
+    .button-primary {
+      background: var(--primary);
+      color: var(--on-primary);
+    }
+
+    .button-primary:active {
+      background: var(--primary-active);
+    }
+
+    .button-secondary {
+      background: var(--surface-card);
+      color: var(--ink);
+      border-color: var(--hairline-strong);
+    }
+
+    .button-ink {
+      background: var(--ink);
+      color: #11100e;
+    }
+
+    .button-ghost {
+      background: transparent;
+      color: var(--ink);
+      border-color: var(--hairline);
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 360px;
+      min-height: calc(100vh - 42px);
+    }
+
+    .app-shell.is-chat-view {
+      grid-template-columns: 280px minmax(0, 1fr);
+    }
+
+    .sidebar,
+    .assistant {
+      border-right: 1px solid var(--hairline);
+      background: #111111;
+      min-height: 0;
+    }
+
+    .assistant {
+      border-right: 0;
+      border-left: 1px solid var(--hairline);
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      min-height: calc(100vh - 42px);
+    }
+
+    .assistant.is-hidden {
+      display: none;
+    }
+
+    .assistant-header {
+      padding: 20px 16px;
+      border-bottom: 1px solid var(--hairline);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .sidebar-title,
+    .assistant-title {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.25;
+      font-weight: 600;
+    }
+
+    .domain-list {
+      padding: 12px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .sidebar-section {
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      background: #151515;
+      padding: 10px;
+    }
+
+    .sidebar-section-title {
+      margin: 0 0 8px;
+      padding: 0 2px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .domain-card {
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      background: #151515;
+      overflow: hidden;
+    }
+
+    .domain-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      border-bottom: 1px solid var(--hairline-soft);
+    }
+
+    .domain-name {
+      font-weight: 600;
+    }
+
+    .domain-meta {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .tree {
+      padding: 8px;
+    }
+
+    .tree-row {
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--body);
+      text-align: left;
+    }
+
+    .tree-row:hover,
+    .tree-row.is-active {
+      background: var(--surface-strong);
+      color: var(--ink);
+    }
+
+    .tree-icon {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .tree-count {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+
+    .folder-content {
+      display: none;
+      padding: 0 0 4px 18px;
+      background: transparent;
+    }
+
+    .folder-content.is-open {
+      display: grid;
+      gap: 2px;
+    }
+
+    .workspace {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 48px 1fr;
+      background: #0d0d0d;
+    }
+
+    .tab-bar {
+      display: flex;
+      align-items: end;
+      gap: 4px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--hairline);
+      background: transparent;
+    }
+
+    .tab {
+      height: 36px;
+      border: 1px solid var(--hairline);
+      border-bottom: 0;
+      border-radius: 8px 8px 0 0;
+      padding: 0 14px;
+      background: #151515;
+      color: var(--body);
+      font-size: 13px;
+    }
+
+    .tab.is-active {
+      color: var(--ink);
+    }
+
+    .stage {
+      min-height: 0;
+      overflow: auto;
+      padding: 24px;
+    }
+
+    .view {
+      display: none;
+      height: 100%;
+    }
+
+    .view.is-active {
+      display: block;
+    }
+
+    .panel {
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      background: #151515;
+    }
+
+    .screen-intro {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+
+    .screen-intro h1,
+    .screen-intro h2 {
+      margin: 0;
+      font-weight: 400;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+    }
+
+    .screen-intro h1 {
+      font-size: 36px;
+    }
+
+    .screen-intro h2 {
+      font-size: 26px;
+    }
+
+    .screen-intro p {
+      max-width: 620px;
+      margin: 10px 0 0;
+      color: var(--body);
+      font-size: 16px;
+    }
+
+    .domain-create {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 40px;
+    }
+
+    .domain-form {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+    }
+
+    .field.is-wide {
+      grid-column: 1 / -1;
+    }
+
+    .label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .input,
+    .select,
+    .textarea {
+      width: 100%;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 8px;
+      background: var(--surface-card);
+      color: var(--ink);
+      padding: 12px 14px;
+      min-height: 44px;
+      outline: none;
+    }
+
+    .textarea {
+      min-height: 84px;
+      resize: vertical;
+    }
+
+    .help {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .choice-grid {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .choice-card {
+      text-align: left;
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      background: var(--canvas-soft);
+      padding: 16px;
+    }
+
+    .choice-card.is-selected {
+      border-color: var(--ink);
+      background: var(--surface-card);
+    }
+
+    .choice-card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .choice-card span {
+      color: var(--body);
+      font-size: 13px;
+    }
+
+    .prompt-preview {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .prompt-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .prompt-preview-title {
+      margin: 0;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .prompt-preview-meta {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .prompt-editor {
+      width: 100%;
+      min-height: 150px;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 10px;
+      background: #101010;
+      color: var(--body);
+      padding: 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+    }
+
+    .form-footer {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding-top: 12px;
+    }
+
+    .empty-domain {
+      min-height: 520px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 64px;
+    }
+
+    .empty-domain h1 {
+      margin: 0;
+      font-size: 36px;
+      font-weight: 400;
+      letter-spacing: -0.03em;
+    }
+
+    .empty-domain p {
+      max-width: 520px;
+      margin: 12px auto 24px;
+      color: var(--body);
+      font-size: 16px;
+    }
+
+    .source-modal {
+      max-width: 860px;
+      margin: 0 auto;
+      overflow: hidden;
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 28px;
+      border-bottom: 1px solid var(--hairline);
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 26px;
+      font-weight: 400;
+      letter-spacing: -0.02em;
+    }
+
+    .modal-body {
+      padding: 28px;
+      display: grid;
+      gap: 22px;
+    }
+
+    .source-search {
+      border: 1px solid var(--hairline-strong);
+      border-radius: 12px;
+      padding: 14px;
+      background: var(--canvas-soft);
+    }
+
+    .search-label {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--body);
+      font-size: 13px;
+    }
+
+    .search-row {
+      display: grid;
+      grid-template-columns: auto auto 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      border-radius: 999px;
+      border: 1px solid var(--hairline-strong);
+      padding: 0 10px;
+      background: var(--surface-card);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .dropzone {
+      border: 1px dashed var(--hairline-strong);
+      border-radius: 12px;
+      padding: 44px;
+      text-align: center;
+      background: var(--canvas-soft);
+    }
+
+    .dropzone h3 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+    }
+
+    .dropzone p {
+      margin: 0 0 24px;
+      color: var(--body);
+    }
+
+    .source-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .source-status {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+
+    .timeline-pill {
+      border-radius: 999px;
+      padding: 6px 10px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+
+    .timeline-pill.thinking { background: var(--timeline-thinking); }
+    .timeline-pill.read { background: var(--timeline-read); }
+    .timeline-pill.grep { background: var(--timeline-grep); }
+    .timeline-pill.edit { background: var(--timeline-edit); }
+    .timeline-pill.done { background: var(--timeline-done); color: var(--on-primary); }
+
+    .chat-layout {
+      height: calc(100vh - 138px);
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      background: #0d0d0d;
+      overflow: hidden;
+    }
+
+    .chat-transcript {
+      width: min(760px, 100%);
+      margin: 0 auto;
+      padding: 26px 20px 96px;
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      overflow: auto;
+    }
+
+    .chat-path {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .prompt-card,
+    .run-card {
+      border: 1px solid var(--hairline);
+      border-radius: 10px;
+      background: #1d1d1d;
+    }
+
+    .prompt-card {
+      padding: 12px 14px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .assistant-block {
+      color: var(--body);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .assistant-block p {
+      margin: 0 0 12px;
+    }
+
+    .assistant-block strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .assistant-block ul,
+    .assistant-block ol {
+      margin: 8px 0 12px;
+      padding-left: 22px;
+    }
+
+    .assistant-block li {
+      margin: 5px 0;
+    }
+
+    .inline-code {
+      color: var(--ink);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .run-card {
+      overflow: hidden;
+    }
+
+    .run-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--hairline);
+      color: var(--ink);
+      font-size: 12px;
+    }
+
+    .run-card-body {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .run-spinner {
+      width: 14px;
+      height: 14px;
+      border: 1px solid var(--hairline-strong);
+      border-top-color: var(--primary);
+      border-radius: 999px;
+    }
+
+    .chat-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .chat-composer-wrap {
+      padding: 12px 20px 14px;
+      background: linear-gradient(180deg, rgba(13, 13, 13, 0), #0d0d0d 28%);
+    }
+
+    .chat-composer {
+      width: min(760px, 100%);
+      min-height: 44px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--hairline);
+      border-radius: 999px;
+      background: #1d1d1d;
+      padding: 6px 8px;
+    }
+
+    .composer-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      border: 1px solid var(--hairline-strong);
+      background: #2a2a2a;
+      color: var(--ink);
+    }
+
+    .chat-composer input {
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .composer-mode {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .scratchpad {
+      height: 680px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+    }
+
+    .scratch-toolbar,
+    .graph-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid var(--hairline);
+      background: var(--surface-card);
+    }
+
+    .tool-button {
+      height: 32px;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 8px;
+      padding: 0 10px;
+      background: var(--surface-card);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .tool-button.is-active {
+      background: var(--ink);
+      color: #11100e;
+    }
+
+    .swatches {
+      display: flex;
+      gap: 6px;
+      padding: 0 8px;
+      border-left: 1px solid var(--hairline);
+      border-right: 1px solid var(--hairline);
+    }
+
+    .swatch {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid var(--hairline-strong);
+    }
+
+    .scratch-stage {
+      position: relative;
+      background:
+        linear-gradient(var(--hairline-soft) 1px, transparent 1px),
+        linear-gradient(90deg, var(--hairline-soft) 1px, transparent 1px),
+        var(--canvas-soft);
+      background-size: 32px 32px;
+      overflow: hidden;
+    }
+
+    .stroke {
+      position: absolute;
+      border-radius: 999px;
+      transform-origin: left center;
+    }
+
+    .stroke.black { background: var(--ink); }
+    .stroke.red { background: #e25d7d; }
+    .stroke.blue { background: #9fbbe0; }
+    .stroke.green { background: #4eb28e; }
+    .stroke.yellow { background: rgba(192, 133, 50, 0.35); }
+
+    .selection-box {
+      position: absolute;
+      left: 210px;
+      top: 160px;
+      width: 300px;
+      height: 150px;
+      border: 1px solid var(--primary);
+      background: rgba(245, 78, 0, 0.04);
+      border-radius: 8px;
+    }
+
+    .floating-prompt {
+      position: absolute;
+      left: 530px;
+      top: 172px;
+      width: 280px;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 12px;
+      background: var(--surface-card);
+      padding: 12px;
+    }
+
+    .floating-prompt textarea {
+      width: 100%;
+      min-height: 76px;
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 10px;
+      resize: none;
+      color: var(--ink);
+    }
+
+    .floating-actions {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .ai-annotation {
+      position: absolute;
+      border: 2px solid #9fbbe0;
+      color: #d7e6ff;
+      background: rgba(159, 187, 224, 0.14);
+      border-radius: 12px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .graph-layout {
+      height: 700px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .graph-canvas {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      background:
+        linear-gradient(var(--hairline-soft) 1px, transparent 1px),
+        linear-gradient(90deg, var(--hairline-soft) 1px, transparent 1px),
+        var(--canvas-soft);
+      background-size: 24px 24px;
+    }
+
+    .edge {
+      position: absolute;
+      height: 1px;
+      background: var(--hairline-strong);
+      transform-origin: left center;
+    }
+
+    .edge::after {
+      content: "";
+      position: absolute;
+      right: -3px;
+      top: -3px;
+      width: 7px;
+      height: 7px;
+      border-top: 1px solid var(--hairline-strong);
+      border-right: 1px solid var(--hairline-strong);
+      transform: rotate(45deg);
+      background: var(--canvas-soft);
+    }
+
+    .concept-node {
+      position: absolute;
+      width: 210px;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 12px;
+      background: var(--surface-card);
+      padding: 14px;
+    }
+
+    .concept-node.root {
+      border-color: var(--ink);
+    }
+
+    .concept-node h3 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .concept-node p {
+      margin: 0;
+      color: var(--body);
+      font-size: 13px;
+    }
+
+    .node-meta {
+      margin-top: 10px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .assistant-thread {
+      overflow: auto;
+      min-height: 0;
+      padding: 14px 12px 18px;
+      display: grid;
+      align-content: start;
+      gap: 14px;
+    }
+
+    .assistant-panel {
+      display: none;
+      align-content: start;
+      gap: 14px;
+    }
+
+    .assistant-panel.is-active {
+      display: grid;
+    }
+
+    .assistant-message {
+      border: 1px solid var(--hairline);
+      border-radius: 9px;
+      background: #1d1d1d;
+      padding: 10px 12px;
+      color: var(--body);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .assistant-message.is-user {
+      background: #202020;
+      color: var(--ink);
+    }
+
+    .assistant-message p {
+      margin: 0;
+    }
+
+    .assistant-prose {
+      color: var(--body);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .assistant-prose p {
+      margin: 0 0 10px;
+    }
+
+    .assistant-prose ul {
+      margin: 8px 0 10px;
+      padding-left: 18px;
+    }
+
+    .assistant-prose li {
+      margin: 5px 0;
+    }
+
+    .assistant-prose strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .assistant-card {
+      overflow: hidden;
+      border: 1px solid var(--hairline);
+      border-radius: 9px;
+      background: #1a1a1a;
+    }
+
+    .assistant-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--hairline);
+      color: var(--ink);
+      font-size: 12px;
+    }
+
+    .assistant-card-body {
+      padding: 9px 10px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .assistant-diff {
+      display: grid;
+      gap: 3px;
+    }
+
+    .diff-line {
+      display: block;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .diff-line.add {
+      background: rgba(78, 178, 142, 0.14);
+      color: #9ddfc7;
+    }
+
+    .diff-line.remove {
+      background: rgba(226, 93, 125, 0.12);
+      color: #f0a3b6;
+    }
+
+    .assistant-review {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid var(--hairline);
+      border-radius: 999px;
+      background: #1d1d1d;
+      padding: 6px 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .attachment {
+      margin-top: 10px;
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      background: var(--canvas-soft);
+      padding: 10px;
+      color: var(--body);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .assistant-composer {
+      padding: 6px 8px 6px;
+      border-top: 1px solid var(--hairline);
+      background: #111111;
+    }
+
+    .composer-box {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 999px;
+      background: #1d1d1d;
+      padding: 6px 8px;
+    }
+
+    .composer-box input {
+      border: 0;
+      outline: 0;
+      min-width: 0;
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .code-card {
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      background: var(--surface-card);
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--body);
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 1180px) {
+      .app-shell {
+        grid-template-columns: 240px minmax(0, 1fr);
+      }
+
+      .assistant {
+        display: none;
+      }
+
+      .choice-grid,
+      .chat-layout,
+      .graph-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .desktop-titlebar {
+        align-items: start;
+        height: auto;
+        gap: 16px;
+        padding: 16px;
+        flex-direction: column;
+      }
+
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .stage {
+        padding: 16px;
+      }
+
+      .domain-form {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="desktop-titlebar">
+      <div class="titlebar-left">
+        <div class="brand">
+          <span class="brand-mark">A</span>
+          <span>Apore</span>
+        </div>
+
+        <div class="menu-bar" aria-label="Application menu">
+          <span>File</span>
+          <span>Edit</span>
+          <span>View</span>
+          <span>Help</span>
+        </div>
+      </div>
+
+      <div class="titlebar-right top-actions">
+        <div class="window-controls" aria-label="Window controls">
+          <button class="window-button" aria-label="Minimize">-</button>
+          <button class="window-button" aria-label="Maximize">□</button>
+          <button class="window-button close" aria-label="Close">×</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="domain-list">
+          <section class="domain-card">
+            <div class="domain-row">
+              <div>
+                <div class="domain-name">Math</div>
+                <div class="domain-meta">Discrete math for proof-based CS</div>
+              </div>
+              <span class="tree-count">0.51</span>
+            </div>
+
+            <div class="tree">
+              <button class="tree-row is-active" data-folder-button="sessions" aria-expanded="true">
+                <span class="tree-icon">▾</span>
+                <span>Session History</span>
+                <span class="tree-count">2</span>
+              </button>
+              <div class="folder-content is-open" data-folder-content="sessions">
+                <button class="tree-row" data-view-button="chat">
+                  <span class="tree-icon">C</span>
+                  <span>Discrete Math Tutor Chat</span>
+                  <span></span>
+                </button>
+                <button class="tree-row is-active" data-view-button="scratchpad">
+                  <span class="tree-icon">S</span>
+                  <span>Set Theory Scratchpad</span>
+                  <span></span>
+                </button>
+              </div>
+
+              <button class="tree-row" data-folder-button="sources" data-view-button="sources" aria-expanded="false">
+                <span class="tree-icon">▸</span>
+                <span>GroundedWiki Sources</span>
+                <span class="tree-count">4</span>
+              </button>
+              <div class="folder-content" data-folder-content="sources">
+                <button class="tree-row">
+                  <span class="tree-icon">P</span>
+                  <span>lecture-01.pdf</span>
+                  <span></span>
+                </button>
+                <button class="tree-row">
+                  <span class="tree-icon">V</span>
+                  <span>sets-video.mp4</span>
+                  <span></span>
+                </button>
+                <button class="tree-row">
+                  <span class="tree-icon">W</span>
+                  <span>mit-set-notes.html</span>
+                  <span></span>
+                </button>
+              </div>
+
+              <button class="tree-row" data-folder-button="graph" aria-expanded="false">
+                <span class="tree-icon">▸</span>
+                <span>Curriculum Graph</span>
+                <span class="tree-count">8</span>
+              </button>
+              <div class="folder-content" data-folder-content="graph">
+                <button class="tree-row" data-view-button="graph">
+                  <span class="tree-icon">G</span>
+                  <span>Curriculum Map</span>
+                  <span></span>
+                </button>
+                <button class="tree-row">
+                  <span class="tree-icon">N</span>
+                  <span>Sets</span>
+                  <span></span>
+                </button>
+                <button class="tree-row">
+                  <span class="tree-icon">N</span>
+                  <span>Intersection</span>
+                  <span></span>
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <div class="tab-bar">
+          <button class="tab is-active" data-tab-label>Set Theory Scratchpad</button>
+          <button class="tab">domain.json</button>
+        </div>
+
+        <section class="stage">
+          <section class="view" data-view="create">
+            <article class="domain-create panel">
+              <div class="screen-intro">
+                <div>
+                  <p class="eyebrow">Domain scaffold</p>
+                  <h1>Create learning domain</h1>
+                  <p>The desktop app creates a local folder-backed workspace. The name organizes the sidebar; the learning objective tells Apore what this domain should become teachable as.</p>
+                </div>
+                <button class="button-secondary">Preview manifest</button>
+              </div>
+
+              <form class="domain-form">
+                <label class="field">
+                  <span class="label">Domain name</span>
+                  <input class="input" value="Math" />
+                  <p class="help">Organizational label in the left sidebar.</p>
+                </label>
+
+                <label class="field">
+                  <span class="label">Model</span>
+                  <select class="select">
+                    <option>claude-opus-4-8</option>
+                    <option>claude-sonnet-4</option>
+                    <option>gpt-4.1</option>
+                    <option>gemini-pro</option>
+                  </select>
+                  <p class="help">Recommended for proof-heavy math, law, long-context synthesis, and careful tutoring.</p>
+                </label>
+
+                <label class="field is-wide">
+                  <span class="label">What are you trying to learn?</span>
+                  <input class="input" value="I want to learn discrete mathematics for proof-based computer science." />
+                </label>
+
+                <div class="choice-grid">
+                  <button type="button" class="choice-card is-selected" data-style-choice="socratic">
+                    <strong>Socratic</strong>
+                    <span>Asks before answering. Good for productive struggle.</span>
+                  </button>
+                  <button type="button" class="choice-card" data-style-choice="case">
+                    <strong>Case-Based</strong>
+                    <span>Teaches through scenarios, examples, cases, and application.</span>
+                  </button>
+                  <button type="button" class="choice-card" data-style-choice="guided">
+                    <strong>Guided Discovery</strong>
+                    <span>Hints and nudges help the learner derive the idea.</span>
+                  </button>
+                  <button type="button" class="choice-card" data-style-choice="custom">
+                    <strong>Custom</strong>
+                    <span>Bring your own teaching prompt for this domain.</span>
+                  </button>
+                </div>
+
+                <label class="prompt-preview">
+                  <span class="prompt-preview-header">
+                    <span class="prompt-preview-title">Teaching prompt</span>
+                    <span class="prompt-preview-meta" data-style-meta>socratic preset · editable</span>
+                  </span>
+                  <textarea class="prompt-editor" data-style-prompt>Teach through Socratic questioning. Do not immediately give final answers. Ask the learner to state assumptions, identify the relevant definition, and test one step at a time. When the learner is stuck, provide a small hint grounded in the domain's compiled sources. Prefer productive struggle over direct explanation.</textarea>
+                </label>
+
+                <div class="form-footer">
+                  <button type="button" class="button-secondary">Cancel</button>
+                  <button type="button" class="button-primary">Create domain</button>
+                </div>
+              </form>
+            </article>
+          </section>
+
+          <section class="view" data-view="sources">
+            <div class="screen-intro">
+              <div>
+                <p class="eyebrow">GroundedWiki</p>
+                <h1>Add materials</h1>
+                <p>After a domain is scaffolded on disk, the first CTA is adding sources. The Tauri shell opens files locally while the Python backend extracts, transcribes, and compiles through localhost.</p>
+              </div>
+              <button class="button-primary">Add sources</button>
+            </div>
+
+            <article class="source-modal panel">
+              <div class="modal-header">
+                <div>
+                  <p class="eyebrow">Source intake</p>
+                  <h2>Add sources to Math</h2>
+                </div>
+                <button class="button-secondary">Close</button>
+              </div>
+
+              <div class="modal-body">
+                <section class="source-search">
+                  <span class="search-label">Paste a website or YouTube/video link</span>
+                  <div class="search-row">
+                    <span class="pill">Website</span>
+                    <span class="pill">YouTube</span>
+                    <input class="input" value="https://www.youtube.com/watch?v=set-theory-lecture" />
+                    <button class="button-ink">Import</button>
+                  </div>
+                </section>
+
+                <section class="dropzone">
+                  <h3>or drop your files</h3>
+                  <p>PDF, images, docs, audio, video, text, websites, and copied text.</p>
+                  <div class="source-actions">
+                    <button class="button-secondary">Upload files</button>
+                    <button class="button-secondary">Websites</button>
+                    <button class="button-secondary">Copied text</button>
+                    <button class="button-secondary">Audio / video</button>
+                  </div>
+                </section>
+
+                <section class="source-status" aria-label="Processing stages">
+                  <span class="timeline-pill thinking">Queued</span>
+                  <span class="timeline-pill read">Extracting</span>
+                  <span class="timeline-pill grep">Transcribing</span>
+                  <span class="timeline-pill edit">Compiling</span>
+                  <span class="timeline-pill done">Ready</span>
+                </section>
+
+                <pre class="code-card">sources/
+  index.json
+  raw/
+    lecture-01.pdf
+    sets-video.mp4
+  transcripts/
+    sets-video.md
+  extracted/
+    lecture-01.md
+    sets-video.md</pre>
+              </div>
+            </article>
+          </section>
+
+          <section class="view" data-view="chat">
+            <section class="chat-layout panel">
+              <article class="chat-transcript">
+                <div class="chat-path">Math / Session History / Discrete Math Tutor Chat</div>
+
+                <div class="prompt-card">
+                  I think the answer is 2 and 3, maybe also 4. Can you check my reasoning without giving it away?
+                </div>
+
+                <div class="assistant-block">
+                  <p><strong>Before:</strong> You selected every element that appears in B.</p>
+                  <p><strong>Now:</strong> Keep the rule tighter: intersection means the element must appear in both sets.</p>
+                  <ul>
+                    <li><strong>Question:</strong> Does <span class="inline-code">4</span> belong to <span class="inline-code">A = {1, 2, 3}</span>?</li>
+                    <li><strong>Source:</strong> <span class="inline-code">knowledge/nodes/intersection.md</span></li>
+                    <li><strong>Signal:</strong> hedging language detected around “maybe also 4”.</li>
+                  </ul>
+                  <p>This mirrors the calibrated tutoring pattern: the card stays, but the answer is not handed over.</p>
+                </div>
+
+                <div class="chat-actions">
+                  <span>thumbs up</span>
+                  <span>thumbs down</span>
+                  <span>copy</span>
+                </div>
+
+                <div class="run-card">
+                  <div class="run-card-header">
+                    <span>Build · Socratic turn on intersection</span>
+                    <span>↻</span>
+                  </div>
+                  <div class="run-card-body">
+                    <span class="run-spinner"></span>
+                    <span>3 of 3 completed · signals captured</span>
+                  </div>
+                </div>
+
+                <div class="assistant-block">
+                  <p>Worked for 25s.</p>
+                  <p><strong>Session update:</strong></p>
+                  <ol>
+                    <li><span class="inline-code">sets</span> stayed stable.</li>
+                    <li><span class="inline-code">intersection</span> received one weak-edge marker.</li>
+                    <li>Difficulty calibration remains near <span class="inline-code">0.51</span>.</li>
+                  </ol>
+                  <p>Try answering with only the shared elements, then rate whether the question felt easy, okay, or hard.</p>
+                </div>
+              </article>
+
+              <div class="chat-composer-wrap">
+                <div class="chat-composer">
+                  <button class="composer-icon">+</button>
+                  <input value="Send follow-up" />
+                  <span class="composer-mode">Auto</span>
+                  <button class="composer-icon">↵</button>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <section class="view is-active" data-view="scratchpad">
+            <div class="screen-intro">
+              <div>
+                <p class="eyebrow">Scratchpad + Vision</p>
+                <h1>Drawable workspace</h1>
+                <p>tldraw owns the canvas. Apore owns layer semantics, selection capture, AI vision, and the assistant handoff.</p>
+              </div>
+              <button class="button-secondary">Show scratchpad.json</button>
+            </div>
+
+            <article class="scratchpad panel">
+              <header class="scratch-toolbar">
+                <button class="tool-button is-active">Select</button>
+                <button class="tool-button">Pen</button>
+                <button class="tool-button">Eraser</button>
+                <div class="swatches">
+                  <span class="swatch" style="background: var(--ink)"></span>
+                  <span class="swatch" style="background: #e25d7d"></span>
+                  <span class="swatch" style="background: #9fbbe0"></span>
+                  <span class="swatch" style="background: #4eb28e"></span>
+                  <span class="swatch" style="background: rgba(192, 133, 50, 0.35)"></span>
+                </div>
+                <button class="tool-button">Clear</button>
+                <button class="tool-button">Ask about full canvas</button>
+                <button class="tool-button is-active">Show AI layer</button>
+              </header>
+
+              <section class="scratch-stage">
+                <span class="stroke black" style="left: 120px; top: 112px; width: 260px; height: 4px; transform: rotate(6deg);"></span>
+                <span class="stroke black" style="left: 134px; top: 160px; width: 180px; height: 4px; transform: rotate(-2deg);"></span>
+                <span class="stroke red" style="left: 170px; top: 232px; width: 210px; height: 4px; transform: rotate(13deg);"></span>
+                <span class="stroke blue" style="left: 440px; top: 248px; width: 160px; height: 4px; transform: rotate(-20deg);"></span>
+                <span class="stroke yellow" style="left: 196px; top: 188px; width: 220px; height: 24px; transform: rotate(0deg);"></span>
+
+                <div class="selection-box"></div>
+
+                <div class="floating-prompt">
+                  <textarea>Where did this proof step go wrong?</textarea>
+                  <div class="floating-actions">
+                    <button class="button-secondary">Speak</button>
+                    <button class="button-primary">Send to tutor</button>
+                  </div>
+                </div>
+
+                <div class="ai-annotation" style="left: 222px; top: 325px; width: 240px;">
+                  AI layer: this step assumes the implication you are trying to prove.
+                </div>
+              </section>
+            </article>
+          </section>
+
+          <section class="view" data-view="graph">
+            <div class="screen-intro">
+              <div>
+                <p class="eyebrow">Adaptive curriculum</p>
+                <h1>Curriculum map</h1>
+                <p>Nodes are movable curriculum cards. Edges mean prerequisite dependency. The curriculum builder agent proposes edits, then the user accepts them.</p>
+              </div>
+              <button class="button-primary">Consult curriculum agent</button>
+            </div>
+
+            <section class="graph-layout">
+              <article class="panel" style="overflow: hidden;">
+                <header class="graph-toolbar">
+                  <button class="tool-button">Add node</button>
+                  <button class="tool-button">Connect</button>
+                  <button class="tool-button">Auto layout</button>
+                  <button class="tool-button">Open markdown</button>
+                </header>
+
+                <section class="graph-canvas">
+                  <span class="edge" style="left: 192px; top: 164px; width: 170px; transform: rotate(8deg);"></span>
+                  <span class="edge" style="left: 386px; top: 184px; width: 160px; transform: rotate(11deg);"></span>
+                  <span class="edge" style="left: 386px; top: 184px; width: 150px; transform: rotate(48deg);"></span>
+
+                  <article class="concept-node root" style="left: 48px; top: 112px;">
+                    <h3>Discrete Mathematics</h3>
+                    <p>Root scope for proof-based computer science.</p>
+                    <div class="node-meta"><span class="pill">root</span></div>
+                  </article>
+
+                  <article class="concept-node" style="left: 364px; top: 138px;">
+                    <h3>Sets</h3>
+                    <p>Collections, membership, equality, empty set.</p>
+                    <div class="node-meta"><span class="pill">concept</span><span class="pill">ready</span></div>
+                  </article>
+
+                  <article class="concept-node" style="left: 620px; top: 174px;">
+                    <h3>Subsets</h3>
+                    <p>Every element of A is contained in B.</p>
+                    <div class="node-meta"><span class="pill">dependent</span></div>
+                  </article>
+
+                  <article class="concept-node" style="left: 578px; top: 356px;">
+                    <h3>Set Operations</h3>
+                    <p>Union, intersection, difference, complement.</p>
+                    <div class="node-meta"><span class="pill">split suggested</span></div>
+                  </article>
+                </section>
+              </article>
+
+            </section>
+          </section>
+        </section>
+      </main>
+
+      <aside class="assistant">
+        <section class="assistant-thread">
+          <section class="assistant-panel is-active" data-assistant-content="scratchpad">
+            <article class="assistant-message is-user">
+              <p>that scratchpad selection should be checked for the proof error</p>
+            </article>
+
+            <article class="assistant-prose">
+              <p>I’ll inspect the selected region and send it into the tutor thread as an image attachment.</p>
+              <p><strong>Before:</strong> the scratchpad had no canonical chat handoff.</p>
+              <p><strong>Now:</strong> the selection becomes a normal chat message with bounds and a crop path.</p>
+            </article>
+
+            <article class="assistant-card">
+              <div class="assistant-card-header">
+                <span>Build · Scratchpad selection → tutor chat</span>
+                <span>↻</span>
+              </div>
+              <div class="assistant-card-body">
+                3 of 3 completed · image crop attached
+              </div>
+            </article>
+
+            <article class="assistant-prose">
+              <p>Implemented interaction summary:</p>
+              <ul>
+                <li>Selection bounds are preserved.</li>
+                <li>The cropped image is sent to the right panel chat.</li>
+                <li>The AI can return annotations on the AI layer.</li>
+              </ul>
+            </article>
+
+            <article class="assistant-card">
+              <div class="assistant-card-header">
+                <span>scratchpad.json</span>
+                <span>+42</span>
+              </div>
+              <div class="assistant-card-body assistant-diff">
+                <span class="diff-line remove">- floatingPrompt.ownsHistory = true</span>
+                <span class="diff-line add">+ floatingPrompt.target = "assistant_thread"</span>
+                <span class="diff-line add">+ selection.attachments.push(crop)</span>
+              </div>
+            </article>
+
+            <article class="assistant-prose">
+              <p>Read lints: clean.</p>
+            </article>
+
+            <div class="assistant-review">
+              <span>1 File</span>
+              <button class="tool-button">Undo</button>
+              <button class="tool-button is-active">Review</button>
+            </div>
+          </section>
+
+          <section class="assistant-panel" data-assistant-content="graph">
+            <article class="assistant-message is-user">
+              <p>help me make this curriculum path more teachable</p>
+            </article>
+
+            <article class="assistant-prose">
+              <p>I’ll review the graph as a curriculum designer and propose edits as graph operations.</p>
+              <p><strong>Goal:</strong> keep the path mostly linear, with leaf notes for examples and common mistakes.</p>
+            </article>
+
+            <article class="assistant-card">
+              <div class="assistant-card-header">
+                <span>Curriculum Builder · Agent proposal</span>
+                <span>↻</span>
+              </div>
+              <div class="assistant-card-body">
+                Split Set Operations into union, intersection, and difference. Keep Subsets before Power Sets. Add a leaf note for common notation mistakes.
+              </div>
+            </article>
+
+            <article class="assistant-card">
+              <div class="assistant-card-header">
+                <span>graph.json</span>
+                <span>+4 ops</span>
+              </div>
+              <div class="assistant-card-body assistant-diff">
+                <span class="diff-line add">+ create_node: intersection</span>
+                <span class="diff-line add">+ create_node: union</span>
+                <span class="diff-line add">+ create_edge: sets → intersection</span>
+                <span class="diff-line add">+ create_edge: sets → union</span>
+              </div>
+            </article>
+
+            <div class="assistant-review">
+              <span>Graph proposal</span>
+              <button class="tool-button">Undo</button>
+              <button class="tool-button is-active">Apply</button>
+            </div>
+          </section>
+        </section>
+
+        <footer class="assistant-composer">
+          <div class="composer-box">
+            <button class="composer-icon">+</button>
+            <input value="Send follow-up" />
+            <span class="composer-mode">Auto</span>
+            <button class="composer-icon">↵</button>
+          </div>
+        </footer>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const appShell = document.querySelector(".app-shell");
+    const assistant = document.querySelector(".assistant");
+    const buttons = Array.from(document.querySelectorAll("[data-view-button]"));
+    const views = Array.from(document.querySelectorAll("[data-view]"));
+    const assistantPanels = Array.from(document.querySelectorAll("[data-assistant-content]"));
+    const tabLabel = document.querySelector("[data-tab-label]");
+    const labels = {
+      create: "New Learning Domain",
+      sources: "Add Sources",
+      chat: "Discrete Math Tutor Chat",
+      scratchpad: "Set Theory Scratchpad",
+      graph: "Curriculum Map"
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = button.dataset.viewButton;
+        buttons.forEach((item) => item.classList.toggle("is-active", item === button));
+        views.forEach((view) => view.classList.toggle("is-active", view.dataset.view === target));
+        assistantPanels.forEach((panel) => {
+          const panelTarget = target === "graph" ? "graph" : "scratchpad";
+          panel.classList.toggle("is-active", panel.dataset.assistantContent === panelTarget);
+        });
+        appShell?.classList.toggle("is-chat-view", target === "chat");
+        assistant?.classList.toggle("is-hidden", target === "chat");
+        tabLabel.textContent = labels[target];
+      });
+    });
+
+    const teachingPrompts = {
+      socratic: {
+        meta: "socratic preset · editable",
+        text: "Teach through Socratic questioning. Do not immediately give final answers. Ask the learner to state assumptions, identify the relevant definition, and test one step at a time. When the learner is stuck, provide a small hint grounded in the domain's compiled sources. Prefer productive struggle over direct explanation."
+      },
+      case: {
+        meta: "case-based preset · editable",
+        text: "Teach through concrete cases before abstraction. Present a short scenario, ask the learner to classify what is happening, then connect the case back to the general rule. Use counterexamples when helpful. Keep each case grounded in the domain's sources and ask the learner to explain the transfer."
+      },
+      guided: {
+        meta: "guided discovery preset · editable",
+        text: "Guide the learner toward discovering the idea themselves. Break the concept into small observations, reveal hints gradually, and ask the learner to summarize each step before moving on. Prefer scaffolded prompts, partial examples, and reflective checks over direct exposition."
+      },
+      custom: {
+        meta: "custom prompt · editable",
+        text: "Define how Apore should teach this domain. Include when it should ask questions, when it should explain, how it should use sources, and what kind of feedback style the learner prefers."
+      }
+    };
+
+    const styleButtons = Array.from(document.querySelectorAll("[data-style-choice]"));
+    const stylePrompt = document.querySelector("[data-style-prompt]");
+    const styleMeta = document.querySelector("[data-style-meta]");
+
+    styleButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const preset = teachingPrompts[button.dataset.styleChoice];
+        styleButtons.forEach((item) => item.classList.toggle("is-selected", item === button));
+        if (preset && stylePrompt && styleMeta) {
+          stylePrompt.value = preset.text;
+          styleMeta.textContent = preset.meta;
+        }
+      });
+    });
+
+    const folderButtons = Array.from(document.querySelectorAll("[data-folder-button]"));
+
+    folderButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = button.dataset.folderButton;
+        const content = document.querySelector(`[data-folder-content="${target}"]`);
+        const nextOpen = !(content && content.classList.contains("is-open"));
+        button.classList.toggle("is-active", nextOpen);
+        button.setAttribute("aria-expanded", String(nextOpen));
+        const icon = button.querySelector(".tree-icon");
+        if (icon) icon.textContent = nextOpen ? "▾" : "▸";
+        if (content) content.classList.toggle("is-open", nextOpen);
+      });
+    });
+  </script>
+</body>
+</html>

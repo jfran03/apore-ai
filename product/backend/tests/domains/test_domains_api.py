@@ -1,8 +1,11 @@
 import json
+import shutil
 
 import pytest
 from fastapi.testclient import TestClient
 
+import apore.api.app as app_module
+import apore.api.domain_routes as domain_routes
 from apore.api.app import app
 from apore.domains import store
 
@@ -76,3 +79,32 @@ def test_health_reports_testbed(monkeypatch):
     assert client.get("/health").json()["testbed"] is False
     monkeypatch.setenv("APORE_TESTBED", "1")
     assert client.get("/health").json()["testbed"] is True
+
+
+def test_domain_session_title_uses_testbed_stub_provider(monkeypatch):
+    from apore.providers.stub import StubProvider
+
+    monkeypatch.setenv("APORE_TESTBED", "1")
+    monkeypatch.setenv("APORE_TESTBED_PROVIDER", "stub")
+    seen: dict[str, str] = {}
+
+    def fail_if_direct_provider_lookup(provider_name: str):
+        raise AssertionError(f"direct provider lookup bypassed app helper: {provider_name}")
+
+    def app_provider_lookup(provider_name: str):
+        seen["provider_name"] = provider_name
+        return StubProvider()
+
+    monkeypatch.setattr(domain_routes, "get_provider", fail_if_direct_provider_lookup, raising=False)
+    monkeypatch.setattr(app_module, "get_provider", app_provider_lookup)
+
+    created = client.post("/domains", json=CREATE_BODY).json()
+    record = store.load_domain(created["id"])
+    src = app_module.PROGRAM_ROOT / "domains" / "_pytest" / "chapters" / "01-intro"
+    shutil.copytree(src, store.chapters_dir(record) / "01-intro")
+
+    resp = client.post(f"/domains/{record.domain_id}/sessions", json={})
+
+    assert resp.status_code == 200
+    assert resp.json()["title"]
+    assert seen["provider_name"] == "stub"

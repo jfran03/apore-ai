@@ -178,15 +178,34 @@ def _get_session(session_id: str) -> SessionState:
     return sessions[session_id]
 
 
+def _testbed_stub_provider_enabled() -> bool:
+    return (
+        os.environ.get("APORE_TESTBED") == "1"
+        and os.environ.get("APORE_TESTBED_PROVIDER") == "stub"
+    )
+
+
+def _active_provider_name() -> str | None:
+    if _testbed_stub_provider_enabled():
+        return "stub"
+    return get_active_provider()
+
+
+def _active_model_name() -> str | None:
+    if _testbed_stub_provider_enabled():
+        return "stub-model"
+    return get_active_model()
+
+
 def _require_provider():
-    provider_name = get_active_provider()
+    provider_name = _active_provider_name()
     if provider_name is None:
         raise HTTPException(
             status_code=503,
             detail="No LLM provider configured. Set API keys via PUT /config/provider",
         )
     provider = get_provider(provider_name)
-    model = get_active_model() or "claude-sonnet-4-20250514"
+    model = _active_model_name() or "claude-sonnet-4-20250514"
     return provider, model
 
 
@@ -229,7 +248,7 @@ def _graph_for_chapter_root(chapter_root: Path) -> object:
 
 
 def _provider_factory() -> object:
-    provider_name = get_active_provider()
+    provider_name = _active_provider_name()
     if provider_name is None:
         raise ValueError("No LLM provider configured")
     return get_provider(provider_name)
@@ -262,8 +281,8 @@ def _question_bank_generation_status(chapter_root: Path) -> QuestionBankGenerate
 def _build_metadata(sess: SessionState) -> dict:
     return {
         **sess.metadata,
-        "provider": get_active_provider() or "stub",
-        "model": get_active_model() or "stub-model",
+        "provider": _active_provider_name() or "stub",
+        "model": _active_model_name() or "stub-model",
         "knowledge_source": sess.knowledge_source,
     }
 
@@ -284,9 +303,9 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
     fixture_commit = _upstream_commit_for_knowledge_source(knowledge_source)
     now = datetime.now(timezone.utc).isoformat()
 
-    provider_name = get_active_provider()
+    provider_name = _active_provider_name()
     provider = get_provider(provider_name) if provider_name else None
-    model = get_active_model() or "stub-model"
+    model = _active_model_name() or "stub-model"
     title = generate_session_title(
         chapter=chapter,
         knowledge_source=knowledge_source,
@@ -715,14 +734,16 @@ def post_fetch_fixture(name: str) -> FixtureFetchResponse:
 @app.get("/config/provider", response_model=ProviderConfigResponse)
 def get_provider_config_endpoint() -> ProviderConfigResponse:
     cfg = get_provider_config()
+    active_provider = "stub" if _testbed_stub_provider_enabled() else cfg["active_provider"]
+    active_model = "stub-model" if _testbed_stub_provider_enabled() else cfg["active_model"]
     return ProviderConfigResponse(
         anthropic_api_key_set=cfg["anthropic_api_key_set"],
         anthropic_api_key_hint=cfg["anthropic_api_key_hint"],
         nim_api_key_set=cfg["nim_api_key_set"],
         nim_api_key_hint=cfg["nim_api_key_hint"],
         model=cfg["model"],
-        active_provider=cfg["active_provider"],
-        active_model=cfg["active_model"],
+        active_provider=active_provider,
+        active_model=active_model,
     )
 
 
@@ -733,14 +754,16 @@ def put_provider_config(body: ProviderConfigUpdate) -> ProviderConfigResponse:
         nim_api_key=body.nim_api_key,
         model=body.model,
     )
+    active_provider = "stub" if _testbed_stub_provider_enabled() else cfg["active_provider"]
+    active_model = "stub-model" if _testbed_stub_provider_enabled() else cfg["active_model"]
     return ProviderConfigResponse(
         anthropic_api_key_set=cfg["anthropic_api_key_set"],
         anthropic_api_key_hint=cfg["anthropic_api_key_hint"],
         nim_api_key_set=cfg["nim_api_key_set"],
         nim_api_key_hint=cfg["nim_api_key_hint"],
         model=cfg["model"],
-        active_provider=cfg["active_provider"],
-        active_model=cfg["active_model"],
+        active_provider=active_provider,
+        active_model=active_model,
     )
 
 
@@ -752,8 +775,8 @@ def post_batch_run(body: BatchRunRequest) -> BatchRunResponse:
         misconceptions=body.profile.get("misconceptions", []),
         seed=body.profile.get("seed", 42),
     )
-    provider_name = get_active_provider() or "stub"
-    model = get_active_model() or "stub-model"
+    provider_name = _active_provider_name() or "stub"
+    model = _active_model_name() or "stub-model"
 
     sim_run_sessions(
         num_sessions=body.sessions,

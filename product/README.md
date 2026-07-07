@@ -68,7 +68,10 @@ python scripts/seed_domain.py <domain-id> [source-domain-id]
 ```
 
 The optional source defaults to `discrete-math`. Use `APORE_DATA_DIR=/tmp/...`
-with testbed runs when you want isolated throwaway domain data.
+with testbed runs when you want isolated throwaway domain data. For deterministic
+browser E2E without external LLM credentials, also set
+`APORE_TESTBED_PROVIDER=stub`; this exposes the built-in stub provider only while
+testbed mode is enabled.
 
 ## Frontend
 

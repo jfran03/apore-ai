@@ -94,3 +94,27 @@ def test_slug_is_filesystem_safe():
     # slug chars only: lowercase alnum + hyphen
     slug = rec.domain_id.rsplit("-", 1)[0]
     assert all(c.isalnum() or c == "-" for c in slug)
+
+
+def test_load_domain_rejects_path_traversal_double_dot():
+    _create()
+    with pytest.raises(FileNotFoundError):
+        store.load_domain("..")
+
+
+def test_load_domain_rejects_path_traversal_escape_attempt():
+    _create()
+    with pytest.raises(FileNotFoundError):
+        store.load_domain("../../etc")
+
+
+def test_load_domain_rejects_absolute_path():
+    _create()
+    with pytest.raises(FileNotFoundError):
+        store.load_domain("/etc/passwd")
+
+
+def test_load_domain_rejects_single_dot():
+    _create()
+    with pytest.raises(FileNotFoundError):
+        store.load_domain(".")

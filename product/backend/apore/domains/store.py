@@ -142,7 +142,13 @@ def list_domains() -> tuple[list[DomainRecord], list[InvalidDomain]]:
 
 
 def load_domain(domain_id: str) -> DomainRecord:
-    path = get_data_root() / domain_id
+    root = get_data_root()
+    path = root / domain_id
+
+    # Verify path stays within root (prevent path traversal)
+    if path.resolve().parent != root.resolve():
+        raise FileNotFoundError(f"Domain {domain_id!r} not found")
+
     if not path.is_dir():
         raise FileNotFoundError(f"Domain {domain_id!r} not found")
     return _load_record(path)

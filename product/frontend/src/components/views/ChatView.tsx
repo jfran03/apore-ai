@@ -1,4 +1,24 @@
-export function ChatView() {
+import type { WorkspaceDomain } from '../../api/types';
+import type { BackendState } from '../../hooks/useBackend';
+
+interface ChatViewProps {
+  domain: WorkspaceDomain;
+  sessionId: string | null;
+  backend: BackendState;
+  onSessionCreated: (sessionId: string) => void;
+}
+
+export function ChatView({
+  domain: _domain,
+  sessionId: _sessionId,
+  backend: _backend,
+  onSessionCreated: _onSessionCreated,
+}: ChatViewProps) {
+  void _domain;
+  void _sessionId;
+  void _backend;
+  void _onSessionCreated;
+
   return (
     <section className="view">
       <section className="chat-layout panel">

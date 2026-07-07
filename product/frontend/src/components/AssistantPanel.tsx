@@ -1,13 +1,7 @@
-import type { ViewId } from '../types';
-
-interface AssistantPanelProps {
-  activeView: ViewId;
-}
-
 // The assistant panel mirrors whichever workspace surface is active. In a full
 // chat session the center stage is already the chat surface, so the panel hides.
-export function AssistantPanel({ activeView }: AssistantPanelProps) {
-  const showGraph = activeView === 'graph';
+export function AssistantPanel() {
+  const showGraph = false;
 
   return (
     <aside className="assistant">

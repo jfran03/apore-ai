@@ -4,6 +4,7 @@ import type { ConnectionStatus } from '../hooks/useBackend';
 interface DesktopTitlebarProps {
   status: ConnectionStatus;
   onRefresh: () => void;
+  onOpenSettings?: () => void;
 }
 
 // Native window controls are wired through @tauri-apps/api when running inside

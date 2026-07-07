@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { BackendOverview } from '../BackendOverview';
+import type { WorkspaceDomain } from '../../api/types';
 import type { BackendState } from '../../hooks/useBackend';
 
 type StyleId = 'socratic' | 'case' | 'guided' | 'custom';
@@ -30,7 +31,20 @@ const STYLE_CARDS: { id: StyleId; title: string; blurb: string }[] = [
   { id: 'custom', title: 'Custom', blurb: 'Bring your own teaching prompt for this domain.' },
 ];
 
-export function CreateDomainView({ backend }: { backend: BackendState }) {
+interface CreateDomainViewProps {
+  backend: BackendState;
+  onCreated?: (domain: WorkspaceDomain) => void;
+  onCancel?: (() => void) | null;
+}
+
+export function CreateDomainView({
+  backend,
+  onCreated: _onCreated,
+  onCancel: _onCancel,
+}: CreateDomainViewProps) {
+  void _onCreated;
+  void _onCancel;
+
   const [style, setStyle] = useState<StyleId>('socratic');
   const [prompt, setPrompt] = useState(TEACHING_PROMPTS.socratic.text);
 

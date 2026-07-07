@@ -1,4 +1,12 @@
-export function GraphView() {
+import type { WorkspaceDomain } from '../../api/types';
+
+interface GraphViewProps {
+  domain: WorkspaceDomain;
+}
+
+export function GraphView({ domain: _domain }: GraphViewProps) {
+  void _domain;
+
   return (
     <section className="view">
       <div className="screen-intro">

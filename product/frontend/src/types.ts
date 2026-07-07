@@ -1,9 +1,12 @@
-export type ViewId = 'create' | 'sources' | 'chat' | 'scratchpad' | 'graph';
+export type DomainTab = 'chat' | 'sources' | 'graph' | 'scratchpad';
 
-export const VIEW_LABELS: Record<ViewId, string> = {
-  create: 'New Learning Domain',
-  sources: 'Add Sources',
-  chat: 'Discrete Math Tutor Chat',
-  scratchpad: 'Set Theory Scratchpad',
-  graph: 'Curriculum Map',
+export type AppView =
+  | { kind: 'create-domain' }
+  | { kind: 'domain'; domainId: string; tab: DomainTab; sessionId: string | null };
+
+export const TAB_LABELS: Record<DomainTab, string> = {
+  chat: 'Tutor Chat',
+  sources: 'Sources',
+  graph: 'Curriculum Graph',
+  scratchpad: 'Scratchpad',
 };

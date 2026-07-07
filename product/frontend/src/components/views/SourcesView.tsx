@@ -1,4 +1,12 @@
-export function SourcesView() {
+import type { WorkspaceDomain } from '../../api/types';
+
+interface SourcesViewProps {
+  domain: WorkspaceDomain;
+}
+
+export function SourcesView({ domain: _domain }: SourcesViewProps) {
+  void _domain;
+
   return (
     <section className="view">
       <div className="screen-intro">

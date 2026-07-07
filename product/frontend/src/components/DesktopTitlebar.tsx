@@ -4,7 +4,7 @@ import type { ConnectionStatus } from '../hooks/useBackend';
 interface DesktopTitlebarProps {
   status: ConnectionStatus;
   onRefresh: () => void;
-  onOpenSettings?: () => void;
+  onOpenSettings: () => void;
 }
 
 // Native window controls are wired through @tauri-apps/api when running inside
@@ -21,7 +21,7 @@ async function windowAction(action: 'minimize' | 'toggleMaximize' | 'close') {
   }
 }
 
-export function DesktopTitlebar({ status, onRefresh }: DesktopTitlebarProps) {
+export function DesktopTitlebar({ status, onRefresh, onOpenSettings }: DesktopTitlebarProps) {
   return (
     <header className="desktop-titlebar" data-tauri-drag-region>
       <div className="titlebar-left">
@@ -40,6 +40,14 @@ export function DesktopTitlebar({ status, onRefresh }: DesktopTitlebarProps) {
 
       <div className="titlebar-right top-actions">
         <ConnectionStatusPill status={status} onRefresh={onRefresh} />
+        <button
+          className="window-button"
+          title="Settings"
+          aria-label="Settings"
+          onClick={onOpenSettings}
+        >
+          ⚙
+        </button>
         <div className="window-controls" aria-label="Window controls">
           <button
             className="window-button"

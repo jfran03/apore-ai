@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { createDomainSession, seedDomain } from '../../api/client';
 import type { TranscriptEvent, WorkspaceDomain } from '../../api/types';
 import type { BackendState } from '../../hooks/useBackend';
@@ -20,10 +20,22 @@ export function ChatView(props: ChatViewProps) {
 }
 
 function NewSessionStarter({ domain, backend, onSessionCreated }: ChatViewProps) {
-  const readyChapters = domain.chapters.filter((chapter) => chapter.has_concept_graph);
+  const readyChapters = useMemo(
+    () => domain.chapters.filter((chapter) => chapter.has_concept_graph),
+    [domain.chapters],
+  );
   const [chapterId, setChapterId] = useState(readyChapters[0]?.id ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectedChapterId = readyChapters.some((chapter) => chapter.id === chapterId)
+    ? chapterId
+    : readyChapters[0]?.id ?? '';
+
+  useEffect(() => {
+    setChapterId(readyChapters[0]?.id ?? '');
+    setBusy(false);
+    setError(null);
+  }, [domain.id, readyChapters]);
 
   if (readyChapters.length === 0) {
     return (
@@ -44,7 +56,7 @@ function NewSessionStarter({ domain, backend, onSessionCreated }: ChatViewProps)
 
     try {
       const created = await createDomainSession(domain.id, {
-        chapter_id: chapterId || undefined,
+        chapter_id: selectedChapterId || undefined,
       });
       onSessionCreated(created.session_id);
     } catch (err) {
@@ -63,7 +75,7 @@ function NewSessionStarter({ domain, backend, onSessionCreated }: ChatViewProps)
             <span className="label">Chapter</span>
             <select
               className="select"
-              value={chapterId}
+              value={selectedChapterId}
               onChange={(e) => setChapterId(e.target.value)}
             >
               {readyChapters.map((chapter) => (

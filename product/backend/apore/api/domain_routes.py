@@ -9,6 +9,10 @@ from fastapi import APIRouter, HTTPException
 
 from apore.api.schemas import (
     CreateSessionResponse,
+    QuestionRequest,
+    QuestionResponse,
+    TurnRequest,
+    TurnResponse,
     WorkspaceChapterSummary,
     WorkspaceDomainCreate,
     WorkspaceDomainListResponse,
@@ -18,7 +22,13 @@ from apore.api.schemas import (
     WorkspaceSessionListResponse,
     WorkspaceSessionSummary,
 )
-from apore.api.session_flow import SessionState
+from apore.api.session_flow import (
+    PendingGrading,
+    ReflectionState,
+    SessionState,
+    run_question,
+    run_turn,
+)
 from apore.config.llm import get_active_model, get_active_provider
 from apore.domains import sessionfile, store
 from apore.domains.store import DomainRecord
@@ -270,3 +280,181 @@ def get_domain_session(domain_id: str, session_id: str) -> WorkspaceSessionDetai
         phase=derive_phase(data),
         transcript=data["transcript"],
     )
+
+
+def _snapshot(sess: SessionState) -> dict | None:
+    if not (
+        sess.pending_question or sess.pending_grading or sess.reflection
+        or sess.active_transcript or sess.tutor_mode or sess.awaiting_skip_reason
+    ):
+        return None
+    snap: dict = {
+        "question_count": sess.question_count,
+        "active_concept_id": sess.active_concept_id,
+        "tutor_mode": sess.tutor_mode,
+        "awaiting_skip_reason": sess.awaiting_skip_reason,
+        "active_transcript": list(sess.active_transcript),
+        "pending_question": (
+            sessionfile.question_to_dict(sess.pending_question)
+            if sess.pending_question else None
+        ),
+        "pending_grading": None,
+        "reflection": None,
+    }
+    if sess.pending_grading:
+        snap["pending_grading"] = {
+            "question": sessionfile.question_to_dict(sess.pending_grading.question),
+            "learner_response": sess.pending_grading.learner_response,
+            "assessment": sessionfile.assessment_to_dict(sess.pending_grading.assessment),
+            "dialogue_transcript": list(sess.pending_grading.dialogue_transcript),
+        }
+    if sess.reflection:
+        snap["reflection"] = {
+            "question": sessionfile.question_to_dict(sess.reflection.question),
+            "assessment": sessionfile.assessment_to_dict(sess.reflection.assessment),
+            "grading": sessionfile.grading_to_dict(sess.reflection.grading),
+            "transcript": list(sess.reflection.transcript),
+        }
+    return snap
+
+
+def _rehydrate(record: DomainRecord, session_id: str) -> SessionState:
+    from apore.api import app as app_module
+
+    try:
+        data = sessionfile.load_session_file(record, session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except sessionfile.SessionFileError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    state_path = sessionfile.learner_state_path(record, session_id)
+    if not state_path.is_file():
+        raise HTTPException(status_code=409, detail="learner-state.md missing for session")
+
+    chapter = resolve_chapter(data["knowledge_source"], app_module.PROGRAM_ROOT)
+    resume = data.get("resume") or {}
+    sess = SessionState(
+        session_id=session_id,
+        title=data["title"],
+        knowledge_source=data["knowledge_source"],
+        chapter=chapter,
+        state_path=state_path,
+        scalar=state.read_scalar(state_path),
+        question_count=resume.get("question_count", data["question_count"]),
+        created_at=data["created_at"],
+        focus_mode=data.get("focus_mode", "adaptive"),
+        max_questions=data["max_questions"],
+        asked_question_ids=state.read_asked_ids(state_path),
+        active_transcript=list(resume.get("active_transcript") or []),
+        awaiting_skip_reason=bool(resume.get("awaiting_skip_reason")),
+        tutor_mode=bool(resume.get("tutor_mode")),
+        active_concept_id=resume.get("active_concept_id"),
+    )
+    if resume.get("pending_question"):
+        sess.pending_question = sessionfile.question_from_dict(resume["pending_question"])
+    if resume.get("pending_grading"):
+        pg = resume["pending_grading"]
+        sess.pending_grading = PendingGrading(
+            question=sessionfile.question_from_dict(pg["question"]),
+            learner_response=pg["learner_response"],
+            assessment=sessionfile.assessment_from_dict(pg["assessment"]),
+            dialogue_transcript=list(pg.get("dialogue_transcript") or []),
+        )
+    if resume.get("reflection"):
+        rf = resume["reflection"]
+        sess.reflection = ReflectionState(
+            question=sessionfile.question_from_dict(rf["question"]),
+            assessment=sessionfile.assessment_from_dict(rf["assessment"]),
+            grading=sessionfile.grading_from_dict(rf["grading"]),
+            transcript=list(rf.get("transcript") or []),
+        )
+    app_module.sessions[session_id] = sess
+    return sess
+
+
+def _get_or_rehydrate(record: DomainRecord, session_id: str) -> SessionState:
+    from apore.api import app as app_module
+
+    sess = app_module.sessions.get(session_id)
+    if sess is not None:
+        return sess
+    return _rehydrate(record, session_id)
+
+
+def _persist(record: DomainRecord, sess: SessionState, events: list[dict]) -> None:
+    if events:
+        sessionfile.append_events(record, sess.session_id, events)
+    sessionfile.write_resume(
+        record, sess.session_id,
+        question_count=sess.question_count,
+        resume=_snapshot(sess),
+    )
+
+
+@domain_router.post(
+    "/{domain_id}/sessions/{session_id}/question", response_model=QuestionResponse
+)
+def post_domain_question(
+    domain_id: str, session_id: str, body: QuestionRequest
+) -> QuestionResponse:
+    from apore.api import app as app_module
+
+    record = _load_or_404(domain_id)
+    sess = _get_or_rehydrate(record, session_id)
+    response = run_question(
+        sess,
+        body,
+        session_id=session_id,
+        provider_factory=app_module._require_provider,
+        metadata_factory=lambda: app_module._build_metadata(sess),
+        program_root=app_module.PROGRAM_ROOT,
+    )
+    _persist(record, sess, [{
+        "type": "question",
+        "question_number": response.question_number,
+        "question_id": response.question_id,
+        "concept_id": response.concept_id,
+        "concept_label": response.concept_label,
+        "question_text": response.question_text,
+    }])
+    return response
+
+
+@domain_router.post(
+    "/{domain_id}/sessions/{session_id}/turn", response_model=TurnResponse
+)
+def post_domain_turn(domain_id: str, session_id: str, body: TurnRequest) -> TurnResponse:
+    from apore.api import app as app_module
+
+    record = _load_or_404(domain_id)
+    sess = _get_or_rehydrate(record, session_id)
+    response = run_turn(
+        sess,
+        body,
+        session_id=session_id,
+        provider_factory=app_module._require_provider,
+        program_root=app_module.PROGRAM_ROOT,
+    )
+
+    events: list[dict] = []
+    learner_message = (body.learner_message or body.learner_response or "").strip()
+    if learner_message:
+        events.append({"type": "learner_message", "text": learner_message})
+    if body.skip:
+        events.append({"type": "system", "text": "Learner requested to skip."})
+    if body.skip_reason:
+        events.append({"type": "learner_message", "text": body.skip_reason.strip()})
+    if response.tutor_message:
+        events.append({"type": "tutor_message", "text": response.tutor_message})
+    if response.phase == "graded":
+        events.append({"type": "graded", "correct": response.correct})
+    if response.phase == "reflection" and body.explicit_rating:
+        events.append({
+            "type": "rating",
+            "rating": response.explicit_rating,
+            "reward": response.reward,
+            "new_difficulty": response.new_difficulty,
+        })
+    _persist(record, sess, events)
+    return response

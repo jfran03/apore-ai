@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   getDomainSession,
   postDomainQuestion,
   postDomainTurn,
 } from '../api/client';
 import type { TranscriptEvent, TurnResponse } from '../api/types';
-import { chatReducer, initialChatState, type ChatState } from '../chat/machine';
+import { chatReducer, initialChatState, type ChatAction, type ChatState } from '../chat/machine';
 
 export interface TutorSession {
   state: ChatState;
@@ -41,52 +41,74 @@ function eventsFromTurn(body: Record<string, unknown>, result: TurnResponse): Tr
   return events;
 }
 
+type TutorSessionAction = ChatAction | { type: 'session_reset' };
+
+function tutorSessionReducer(state: ChatState, action: TutorSessionAction): ChatState {
+  if (action.type === 'session_reset') {
+    return initialChatState();
+  }
+
+  return chatReducer(state, action);
+}
+
 export function useTutorSession(domainId: string, sessionId: string): TutorSession {
-  const [state, dispatch] = useReducer(chatReducer, undefined, initialChatState);
-  const busyRef = useRef(false);
-  const questionRequestRef = useRef(0);
+  const sessionKey = `${domainId}\0${sessionId}`;
+  const pendingState = useMemo(() => initialChatState(), [sessionKey]);
+  const [state, dispatch] = useReducer(tutorSessionReducer, undefined, initialChatState);
+  const [loadedSessionKey, setLoadedSessionKey] = useState<string | null>(null);
+  const generationRef = useRef(0);
+  const questionBusyRef = useRef(false);
+  const turnBusyRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    generationRef.current += 1;
+    const generation = generationRef.current;
+
+    questionBusyRef.current = false;
+    turnBusyRef.current = false;
+    setLoadedSessionKey(null);
+    dispatch({ type: 'session_reset' });
 
     getDomainSession(domainId, sessionId)
       .then((detail) => {
-        if (!cancelled) dispatch({ type: 'detail_loaded', detail });
+        if (generationRef.current === generation) {
+          dispatch({ type: 'detail_loaded', detail });
+          setLoadedSessionKey(sessionKey);
+        }
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (generationRef.current === generation) {
           dispatch({
             type: 'request_failed',
             message: err instanceof Error ? err.message : String(err),
           });
+          setLoadedSessionKey(sessionKey);
         }
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [domainId, sessionId]);
+  }, [domainId, sessionId, sessionKey]);
 
   useEffect(() => {
-    questionRequestRef.current += 1;
-    busyRef.current = false;
-  }, [domainId, sessionId]);
+    if (
+      loadedSessionKey !== sessionKey ||
+      state.status !== 'loading_question' ||
+      questionBusyRef.current
+    ) {
+      return;
+    }
 
-  useEffect(() => {
-    if (state.status !== 'loading_question' || busyRef.current) return;
-
-    const requestId = questionRequestRef.current + 1;
+    const generation = generationRef.current;
     let cancelled = false;
-    questionRequestRef.current = requestId;
-    busyRef.current = true;
+    questionBusyRef.current = true;
     dispatch({ type: 'question_requested' });
 
     postDomainQuestion(domainId, sessionId)
       .then((question) => {
-        if (!cancelled) dispatch({ type: 'question_received', question });
+        if (!cancelled && generationRef.current === generation) {
+          dispatch({ type: 'question_received', question });
+        }
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (!cancelled && generationRef.current === generation) {
           dispatch({
             type: 'request_failed',
             message: err instanceof Error ? err.message : String(err),
@@ -94,47 +116,62 @@ export function useTutorSession(domainId: string, sessionId: string): TutorSessi
         }
       })
       .finally(() => {
-        if (questionRequestRef.current === requestId) busyRef.current = false;
+        if (generationRef.current === generation) {
+          questionBusyRef.current = false;
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [state.status, domainId, sessionId]);
+  }, [state.status, domainId, loadedSessionKey, sessionId, sessionKey]);
 
   const runTurn = useCallback(
-    (body: Record<string, unknown>) => {
+    (body: Record<string, unknown>, applyOptimisticUpdate: () => void) => {
+      if (turnBusyRef.current) return;
+
+      const generation = generationRef.current;
+      turnBusyRef.current = true;
+      applyOptimisticUpdate();
+
       postDomainTurn(domainId, sessionId, body)
-        .then((result) =>
-          dispatch({ type: 'turn_result', result, localEvents: eventsFromTurn(body, result) }),
-        )
-        .catch((err) =>
-          dispatch({
-            type: 'request_failed',
-            message: err instanceof Error ? err.message : String(err),
-          }),
-        );
+        .then((result) => {
+          if (generationRef.current === generation) {
+            dispatch({ type: 'turn_result', result, localEvents: eventsFromTurn(body, result) });
+          }
+        })
+        .catch((err) => {
+          if (generationRef.current === generation) {
+            dispatch({
+              type: 'request_failed',
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })
+        .finally(() => {
+          if (generationRef.current === generation) {
+            turnBusyRef.current = false;
+          }
+        });
     },
     [domainId, sessionId],
   );
 
   return {
-    state,
+    state: loadedSessionKey === sessionKey ? state : pendingState,
     sendMessage: (text: string) => {
-      dispatch({ type: 'message_sent', text });
-      runTurn({ learner_message: text });
+      runTurn({ learner_message: text }, () => dispatch({ type: 'message_sent', text }));
     },
     rate: (rating) => {
-      dispatch({ type: 'rating_sent', rating });
-      runTurn({ explicit_rating: rating });
+      runTurn({ explicit_rating: rating }, () => dispatch({ type: 'rating_sent', rating }));
     },
     continueNext: () => {
-      dispatch({ type: 'continue_sent' });
-      runTurn({ continue: true });
+      runTurn({ continue: true }, () => dispatch({ type: 'continue_sent' }));
     },
     skip: () => {
-      dispatch({ type: 'message_sent', text: '(skip this question)' });
-      runTurn({ skip: true });
+      runTurn({ skip: true }, () =>
+        dispatch({ type: 'message_sent', text: '(skip this question)' }),
+      );
     },
     dismissError: () => dispatch({ type: 'error_dismissed' }),
   };

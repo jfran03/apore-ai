@@ -127,10 +127,11 @@ def resolve_chapter(knowledge_source: str, program_root: Path) -> ChapterContext
         return resolve_chapter(f"domain:{domain_id}/{chapter_id}", program_root)
 
     if kind == "workspace":
-        from apore.domains.store import get_data_root
+        from apore.domains.store import load_domain, chapters_dir
 
         assert secondary is not None
-        chapter_root = get_data_root() / primary / "knowledge" / "chapters" / secondary
+        record = load_domain(primary)
+        chapter_root = chapters_dir(record) / secondary
         if not chapter_root.is_dir():
             raise FileNotFoundError(f"Chapter not found: {chapter_root}")
         return ChapterContext(

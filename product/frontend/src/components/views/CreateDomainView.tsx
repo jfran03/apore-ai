@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BackendOverview } from '../BackendOverview';
+import { useState, type FormEvent } from 'react';
+import { createDomain } from '../../api/client';
 import type { WorkspaceDomain } from '../../api/types';
 import type { BackendState } from '../../hooks/useBackend';
 
@@ -31,31 +31,60 @@ const STYLE_CARDS: { id: StyleId; title: string; blurb: string }[] = [
   { id: 'custom', title: 'Custom', blurb: 'Bring your own teaching prompt for this domain.' },
 ];
 
-interface CreateDomainViewProps {
-  backend: BackendState;
-  onCreated?: (domain: WorkspaceDomain) => void;
-  onCancel?: (() => void) | null;
-}
-
 export function CreateDomainView({
   backend,
-  onCreated: _onCreated,
-  onCancel: _onCancel,
-}: CreateDomainViewProps) {
-  void _onCreated;
-  void _onCancel;
-
+  onCreated,
+  onCancel,
+}: {
+  backend: BackendState;
+  onCreated: (domain: WorkspaceDomain) => void;
+  onCancel: (() => void) | null;
+}) {
   const [style, setStyle] = useState<StyleId>('socratic');
   const [prompt, setPrompt] = useState(TEACHING_PROMPTS.socratic.text);
+  const [name, setName] = useState('');
+  const [objective, setObjective] = useState('');
+  const [model, setModel] = useState('auto');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const selectStyle = (id: StyleId) => {
     setStyle(id);
     setPrompt(TEACHING_PROMPTS[id].text);
   };
 
+  const modelOptions = ['auto'];
+  if (backend.provider?.active_model) modelOptions.push(backend.provider.active_model);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createDomain({
+        name: name.trim(),
+        objective: objective.trim(),
+        teaching_style: style,
+        teaching_prompt: prompt,
+        model_preference: model,
+      });
+      onCreated(created);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="view">
-      <BackendOverview backend={backend} />
+      {backend.status === 'offline' && (
+        <div className="alert is-error">
+          Backend offline. Start it with{' '}
+          <span className="inline-code">uvicorn apore.api.app:app --port 8000</span> from{' '}
+          <span className="inline-code">product/backend</span>.
+        </div>
+      )}
 
       <article className="domain-create panel">
         <div className="screen-intro">
@@ -63,30 +92,36 @@ export function CreateDomainView({
             <p className="eyebrow">Domain scaffold</p>
             <h1>Create learning domain</h1>
             <p>
-              The desktop app creates a local folder-backed workspace. The name organizes the
-              sidebar; the learning objective tells Apore what this domain should become teachable as.
+              Creates a self-contained folder under your Apore data directory. The name
+              organizes the sidebar; the learning objective tells Apore what this domain
+              should become teachable as.
             </p>
           </div>
-          <button className="button-secondary">Preview manifest</button>
         </div>
 
-        <form className="domain-form" onSubmit={(e) => e.preventDefault()}>
+        <form className="domain-form" onSubmit={submit}>
           <label className="field">
             <span className="label">Domain name</span>
-            <input className="input" defaultValue="Math" />
+            <input
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Discrete Math"
+            />
             <p className="help">Organizational label in the left sidebar.</p>
           </label>
 
           <label className="field">
             <span className="label">Model</span>
-            <select className="select">
-              <option>claude-opus-4-8</option>
-              <option>claude-sonnet-4</option>
-              <option>gpt-4.1</option>
-              <option>gemini-pro</option>
+            <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
+              {modelOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
             </select>
             <p className="help">
-              Recommended for proof-heavy math, law, long-context synthesis, and careful tutoring.
+              {backend.provider?.active_provider
+                ? `Active provider: ${backend.provider.active_provider}`
+                : 'No provider configured yet — add a key in Settings.'}
             </p>
           </label>
 
@@ -94,7 +129,9 @@ export function CreateDomainView({
             <span className="label">What are you trying to learn?</span>
             <input
               className="input"
-              defaultValue="I want to learn discrete mathematics for proof-based computer science."
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              placeholder="I want to learn discrete mathematics for proof-based computer science."
             />
           </label>
 
@@ -124,12 +161,20 @@ export function CreateDomainView({
             />
           </label>
 
+          {error && <div className="alert is-error">{error}</div>}
+
           <div className="form-footer">
-            <button type="button" className="button-secondary">
-              Cancel
-            </button>
-            <button type="button" className="button-primary">
-              Create domain
+            {onCancel && (
+              <button type="button" className="button-secondary" onClick={onCancel}>
+                Cancel
+              </button>
+            )}
+            <button
+              type="submit"
+              className="button-primary"
+              disabled={!name.trim() || busy || backend.status !== 'online'}
+            >
+              {busy ? 'Creating…' : 'Create domain'}
             </button>
           </div>
         </form>

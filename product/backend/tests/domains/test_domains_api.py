@@ -108,3 +108,24 @@ def test_domain_session_title_uses_testbed_stub_provider(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["title"]
     assert seen["provider_name"] == "stub"
+
+
+def test_domain_question_does_not_reuse_other_domain_cached_session():
+    first = client.post("/domains", json={**CREATE_BODY, "name": "First"}).json()
+    second = client.post("/domains", json={**CREATE_BODY, "name": "Second"}).json()
+    src = app_module.PROGRAM_ROOT / "domains" / "_pytest" / "chapters" / "01-intro"
+    first_record = store.load_domain(first["id"])
+    second_record = store.load_domain(second["id"])
+    shutil.copytree(src, store.chapters_dir(first_record) / "01-intro")
+    shutil.copytree(src, store.chapters_dir(second_record) / "01-intro")
+
+    created = client.post(f"/domains/{first_record.domain_id}/sessions", json={})
+    assert created.status_code == 200
+    session_id = created.json()["session_id"]
+
+    wrong_domain = client.post(
+        f"/domains/{second_record.domain_id}/sessions/{session_id}/question",
+        json={},
+    )
+
+    assert wrong_domain.status_code == 404

@@ -224,7 +224,7 @@ def create_domain_session(
         created_at=now,
     )
 
-    app_module.sessions[session_id] = SessionState(
+    app_module.sessions[_workspace_session_key(record, session_id)] = SessionState(
         session_id=session_id,
         title=title,
         knowledge_source=knowledge_source,
@@ -370,14 +370,18 @@ def _rehydrate(record: DomainRecord, session_id: str) -> SessionState:
             grading=sessionfile.grading_from_dict(rf["grading"]),
             transcript=list(rf.get("transcript") or []),
         )
-    app_module.sessions[session_id] = sess
+    app_module.sessions[_workspace_session_key(record, session_id)] = sess
     return sess
+
+
+def _workspace_session_key(record: DomainRecord, session_id: str) -> str:
+    return f"workspace:{record.domain_id}:{session_id}"
 
 
 def _get_or_rehydrate(record: DomainRecord, session_id: str) -> SessionState:
     from apore.api import app as app_module
 
-    sess = app_module.sessions.get(session_id)
+    sess = app_module.sessions.get(_workspace_session_key(record, session_id))
     if sess is not None:
         return sess
     return _rehydrate(record, session_id)

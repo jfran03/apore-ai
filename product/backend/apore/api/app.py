@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from apore.api.domain_routes import domain_router
 from apore.api.session_flow import (  # noqa: F401 - re-exported for tests/compat
@@ -96,6 +100,32 @@ app.add_middleware(
 )
 
 app.include_router(domain_router)
+
+# Path pattern for the testbed-gated seed endpoint (see domain_routes.py).
+# domain_id is a single path segment (no slashes), so this matches only the
+# exact route and nothing else (e.g. not /domains/{id}/sessions).
+_SEED_PATH_RE = re.compile(r"^/domains/[^/]+/seed$")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _mask_seed_endpoint_405(request: Request, exc: StarletteHTTPException):
+    """Rewrite 405s on the seed path to a generic 404, for every HTTP verb.
+
+    `/domains/{domain_id}/seed` is only ever registered for POST. Starlette's
+    router still matches the path for any other method (GET, HEAD, OPTIONS,
+    PROPFIND, ...) and raises a 405 with an `Allow: POST` header before any
+    handler runs — which leaks the route's existence, and the Allow header
+    actively confirms POST is valid, even when the endpoint is gated off via
+    APORE_TESTBED. No enumeration of per-verb stub routes can fully close
+    this (HEAD/OPTIONS and arbitrary custom verbs from raw ASGI clients
+    bypass any fixed list), so instead we intercept the 405 generically here
+    and return the same 404 shape the POST handler itself returns when
+    ungated, with no Allow header — making the path indistinguishable from a
+    nonexistent route for every method except the real POST handler.
+    """
+    if exc.status_code == 405 and _SEED_PATH_RE.match(request.url.path):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return await http_exception_handler(request, exc)
 
 
 @app.get("/health")

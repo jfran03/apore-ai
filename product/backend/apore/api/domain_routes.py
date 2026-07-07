@@ -482,31 +482,14 @@ def seed_domain_endpoint(domain_id: str, body: SeedRequest) -> SeedResponse:
     return SeedResponse(chapters=chapters)
 
 
-def _seed_endpoint_not_found(domain_id: str) -> None:
-    # Without this, FastAPI/Starlette would resolve the path (since it's
-    # registered for POST) and return 405 for any other verb — leaking the
-    # route's existence even when the testbed gate is off. Registering the
-    # same path for the other common verbs and returning an unconditional
-    # 404 keeps this path indistinguishable from a missing route regardless
-    # of HTTP method or APORE_TESTBED state.
-    raise HTTPException(status_code=404, detail="Not Found")
-
-
-@domain_router.get("/{domain_id}/seed", include_in_schema=False)
-def seed_domain_endpoint_get(domain_id: str) -> None:
-    _seed_endpoint_not_found(domain_id)
-
-
-@domain_router.put("/{domain_id}/seed", include_in_schema=False)
-def seed_domain_endpoint_put(domain_id: str) -> None:
-    _seed_endpoint_not_found(domain_id)
-
-
-@domain_router.patch("/{domain_id}/seed", include_in_schema=False)
-def seed_domain_endpoint_patch(domain_id: str) -> None:
-    _seed_endpoint_not_found(domain_id)
-
-
-@domain_router.delete("/{domain_id}/seed", include_in_schema=False)
-def seed_domain_endpoint_delete(domain_id: str) -> None:
-    _seed_endpoint_not_found(domain_id)
+# Non-POST methods (GET/PUT/PATCH/DELETE/HEAD/OPTIONS/anything else) on this
+# path are intentionally NOT enumerated here. Starlette resolves the path
+# match for any registered route and raises a 405 (with an `Allow: POST`
+# header) before reaching a handler for verbs other than POST — enumerating
+# stub routes per verb can never cover every possible method (HEAD, OPTIONS,
+# and arbitrary/nonstandard verbs from raw ASGI clients all bypass a
+# per-verb decorator list). Instead, `app.py` installs an app-wide
+# StarletteHTTPException handler that rewrites any 405 on this exact path
+# pattern to the same generic 404 this handler returns when ungated, with no
+# Allow header — keeping the route indistinguishable from a nonexistent one
+# for every HTTP method except the real POST handler.

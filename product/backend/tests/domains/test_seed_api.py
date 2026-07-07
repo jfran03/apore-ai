@@ -42,15 +42,27 @@ def test_seed_unknown_source_404(domain_id, monkeypatch):
     assert resp.status_code == 404
 
 
-def test_seed_non_post_method_404_without_testbed_env(domain_id, monkeypatch):
+NON_POST_METHODS = ["GET", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
+
+@pytest.mark.parametrize("method", NON_POST_METHODS)
+def test_seed_non_post_method_404_without_testbed_env(domain_id, monkeypatch, method):
     monkeypatch.delenv("APORE_TESTBED", raising=False)
-    resp = client.get(f"/domains/{domain_id}/seed")
+    resp = client.request(method, f"/domains/{domain_id}/seed")
     assert resp.status_code == 404
+    assert "allow" not in {k.lower() for k in resp.headers.keys()}
+    if method != "HEAD":
+        assert resp.json() == {"detail": "Not Found"}
 
 
-def test_seed_non_post_method_404_with_testbed_env(domain_id, monkeypatch):
+@pytest.mark.parametrize("method", NON_POST_METHODS)
+def test_seed_non_post_method_404_with_testbed_env(domain_id, monkeypatch, method):
     # Even when the testbed gate is on, non-POST verbs on the seed path
-    # must remain indistinguishable from a missing route (no 405 leak).
+    # must remain indistinguishable from a missing route (no 405 leak, no
+    # Allow header disclosing that POST is valid on this path).
     monkeypatch.setenv("APORE_TESTBED", "1")
-    resp = client.get(f"/domains/{domain_id}/seed")
+    resp = client.request(method, f"/domains/{domain_id}/seed")
     assert resp.status_code == 404
+    assert "allow" not in {k.lower() for k in resp.headers.keys()}
+    if method != "HEAD":
+        assert resp.json() == {"detail": "Not Found"}

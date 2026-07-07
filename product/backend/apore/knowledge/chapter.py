@@ -90,7 +90,15 @@ def _parse_knowledge_source(source: str) -> tuple[str, str, str | None]:
             raise ValueError(f"domain knowledge source must be domain:{{id}}/{{chapter}}, got {source!r}")
         domain_id, chapter_id = rest.split("/", 1)
         return "domain", domain_id, chapter_id
-    raise ValueError(f"Unknown knowledge_source {source!r}; use fixture:name or domain:id/chapter")
+    if source.startswith("workspace:"):
+        rest = source.split(":", 1)[1]
+        if "/" not in rest:
+            raise ValueError(
+                f"workspace knowledge source must be workspace:{{id}}/{{chapter}}, got {source!r}"
+            )
+        domain_id, chapter_id = rest.split("/", 1)
+        return "workspace", domain_id, chapter_id
+    raise ValueError(f"Unknown knowledge_source {source!r}; use fixture:name, domain:id/chapter, or workspace:id/chapter")
 
 
 def find_chapter_with_graph(root: Path) -> Path | None:
@@ -117,6 +125,19 @@ def resolve_chapter(knowledge_source: str, program_root: Path) -> ChapterContext
             )
         domain_id, chapter_id = mapped
         return resolve_chapter(f"domain:{domain_id}/{chapter_id}", program_root)
+
+    if kind == "workspace":
+        from apore.domains.store import get_data_root
+
+        assert secondary is not None
+        chapter_root = get_data_root() / primary / "knowledge" / "chapters" / secondary
+        if not chapter_root.is_dir():
+            raise FileNotFoundError(f"Chapter not found: {chapter_root}")
+        return ChapterContext(
+            knowledge_source=knowledge_source,
+            chapter_root=chapter_root,
+            display_name=f"{primary} / {secondary}",
+        )
 
     assert secondary is not None
     chapter_root = program_root / "domains" / primary / "chapters" / secondary

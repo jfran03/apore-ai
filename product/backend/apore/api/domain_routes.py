@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -11,6 +12,8 @@ from apore.api.schemas import (
     CreateSessionResponse,
     QuestionRequest,
     QuestionResponse,
+    SeedRequest,
+    SeedResponse,
     TurnRequest,
     TurnResponse,
     WorkspaceChapterSummary,
@@ -30,7 +33,7 @@ from apore.api.session_flow import (
     run_turn,
 )
 from apore.config.llm import get_active_model, get_active_provider
-from apore.domains import sessionfile, store
+from apore.domains import seed, sessionfile, store
 from apore.domains.store import DomainRecord
 from apore.knowledge.chapter import resolve_chapter
 from apore.providers import get_provider
@@ -458,3 +461,22 @@ def post_domain_turn(domain_id: str, session_id: str, body: TurnRequest) -> Turn
         })
     _persist(record, sess, events)
     return response
+
+
+@domain_router.post("/{domain_id}/seed", response_model=SeedResponse)
+def seed_domain_endpoint(domain_id: str, body: SeedRequest) -> SeedResponse:
+    from apore.api import app as app_module
+
+    if os.environ.get("APORE_TESTBED") != "1":
+        # Invisible outside the testbed — indistinguishable from a missing route.
+        raise HTTPException(status_code=404, detail="Not Found")
+    record = _load_or_404(domain_id)
+    try:
+        chapters = seed.seed_domain(
+            record,
+            program_root=app_module.PROGRAM_ROOT,
+            source_domain_id=body.source_domain_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SeedResponse(chapters=chapters)

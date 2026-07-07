@@ -284,3 +284,11 @@ class WorkspaceSessionDetailResponse(BaseModel):
     scalar: float
     phase: Literal["idle", "awaiting_answer", "awaiting_rating", "reflection", "complete"]
     transcript: list[dict]
+
+
+class SeedRequest(BaseModel):
+    source_domain_id: str = "discrete-math"
+
+
+class SeedResponse(BaseModel):
+    chapters: list[str]

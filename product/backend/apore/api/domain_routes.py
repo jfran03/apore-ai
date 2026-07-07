@@ -32,11 +32,9 @@ from apore.api.session_flow import (
     run_question,
     run_turn,
 )
-from apore.config.llm import get_active_model, get_active_provider
 from apore.domains import seed, sessionfile, store
 from apore.domains.store import DomainRecord
 from apore.knowledge.chapter import resolve_chapter
-from apore.providers import get_provider
 from apore.runtime import state
 from apore.runtime.session_meta import generate_session_title
 
@@ -191,9 +189,9 @@ def create_domain_session(
 
     session_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    provider_name = get_active_provider()
-    provider = get_provider(provider_name) if provider_name else None
-    model = get_active_model() or "stub-model"
+    provider_name = app_module._active_provider_name()
+    provider = app_module.get_provider(provider_name) if provider_name else None
+    model = app_module._active_model_name() or "stub-model"
     title = generate_session_title(
         chapter=chapter,
         knowledge_source=knowledge_source,
@@ -226,7 +224,7 @@ def create_domain_session(
         created_at=now,
     )
 
-    app_module.sessions[session_id] = SessionState(
+    app_module.sessions[_workspace_session_key(record, session_id)] = SessionState(
         session_id=session_id,
         title=title,
         knowledge_source=knowledge_source,
@@ -372,14 +370,18 @@ def _rehydrate(record: DomainRecord, session_id: str) -> SessionState:
             grading=sessionfile.grading_from_dict(rf["grading"]),
             transcript=list(rf.get("transcript") or []),
         )
-    app_module.sessions[session_id] = sess
+    app_module.sessions[_workspace_session_key(record, session_id)] = sess
     return sess
+
+
+def _workspace_session_key(record: DomainRecord, session_id: str) -> str:
+    return f"workspace:{record.domain_id}:{session_id}"
 
 
 def _get_or_rehydrate(record: DomainRecord, session_id: str) -> SessionState:
     from apore.api import app as app_module
 
-    sess = app_module.sessions.get(session_id)
+    sess = app_module.sessions.get(_workspace_session_key(record, session_id))
     if sess is not None:
         return sess
     return _rehydrate(record, session_id)

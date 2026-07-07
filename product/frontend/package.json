@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "test": "vitest run"
   },
   "dependencies": {
     "react": "^18",
@@ -24,6 +25,7 @@
     "vite": "^5",
     "vitest": "^2",
     "@vitejs/plugin-react": "^4",
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "vitest": "^2.1.9"
   }
 }

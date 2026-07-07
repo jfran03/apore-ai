@@ -37,10 +37,12 @@ uvicorn apore.api.app:app --reload --port 8000
 python -m pytest tests -q
 ```
 
-The program root is `product/backend/` (the parent of the `apore/` package).
-Sessions are written to `product/backend/sessions/`, curriculum lives under
-`product/backend/domains/`, and BYOK provider keys persist to
-`product/backend/.apore/config.json` (gitignored).
+The backend stores each domain as a self-contained folder. By default those
+folders are created under `~/Apore/domains/`; set `APORE_DATA_DIR` to point at a
+different domains root. Each domain folder contains `domain.json`, `sessions/`,
+`sources/`, and `knowledge/`, so a domain can be moved or copied as a portable
+unit. BYOK provider keys persist to `product/backend/.apore/config.json`
+(gitignored).
 
 ### API keys (BYOK)
 
@@ -48,6 +50,28 @@ Add an Anthropic and/or NVIDIA NIM key in the app Settings, or pre-seed via a
 `.env` file (see `.env.example`). Anthropic is preferred when both are set; NIM
 is the fallback. Without a key, the runtime returns a clear "no provider
 configured" error and the rest of the shell still works.
+
+### Testbed
+
+For local demos and end-to-end checks, run the backend with testbed mode:
+
+```bash
+cd product/backend
+APORE_TESTBED=1 uvicorn apore.api.app:app --reload --port 8000
+```
+
+`APORE_TESTBED=1` enables the seed endpoint and the in-app seed affordance. To
+seed a domain from the command line:
+
+```bash
+python scripts/seed_domain.py <domain-id> [source-domain-id]
+```
+
+The optional source defaults to `discrete-math`. Use `APORE_DATA_DIR=/tmp/...`
+with testbed runs when you want isolated throwaway domain data. For deterministic
+browser E2E without external LLM credentials, also set
+`APORE_TESTBED_PROVIDER=stub`; this exposes the built-in stub provider only while
+testbed mode is enabled.
 
 ## Frontend
 
@@ -79,15 +103,15 @@ build time with `VITE_API_BASE_URL`.
 
 ## Current state and follow-ups
 
-This is the first vertical slice: the workspace shell, the copied backend, and
-the Tauri wiring. The shell connects to the local backend, lists real
-curriculum, and can create a real tutoring session end to end.
+Functional App v1 is a live local-first slice. The workspace shell creates
+portable domains under `~/Apore/domains/` (or `APORE_DATA_DIR`), connects to the
+local backend, runs persisted and resumable tutoring sessions, and exposes
+in-app BYOK provider settings.
 
 Not yet implemented (next milestones):
 
 - Bundle/spawn the Python API as a Tauri sidecar (currently a separate process).
-- Per-domain filesystem layout (`domain.json` + `sessions/` + `sources/` +
-  `knowledge/`) replacing the global `sessions/` and `domains/` trees.
-- Real source intake, curriculum graph editing, and the tldraw scratchpad.
-- Native desktop integration (file pickers, open-in-folder, app data dir).
+- Real source intake.
+- Curriculum graph editing.
+- The tldraw scratchpad.
 - Production CSP hardening and bundle icons.

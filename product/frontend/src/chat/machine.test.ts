@@ -114,6 +114,18 @@ describe('chatReducer', () => {
     expect(state.status).toBe('loading_question');
   });
 
+  it('preserves scalar when turn result has no new difficulty', () => {
+    const state: ChatState = { ...initialChatState(), scalar: 0.72 };
+
+    const next = chatReducer(state, {
+      type: 'turn_result',
+      result: turn('dialogue', { new_difficulty: null }),
+      localEvents: [],
+    });
+
+    expect(next.scalar).toBe(0.72);
+  });
+
   it('session_complete ends the session', () => {
     let state = chatReducer(initialChatState(), { type: 'detail_loaded', detail: detail('reflection') });
     state = chatReducer(state, { type: 'continue_sent' });

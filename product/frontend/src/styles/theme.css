@@ -806,7 +806,7 @@ button:disabled {
   min-height: 44px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 8px;
   border: 1px solid var(--hairline);
@@ -1264,6 +1264,57 @@ button:disabled {
   color: #f0a3b6;
 }
 
+/* --- live chat additions --- */
+.rating-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.rating-chip {
+  padding: 4px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--hairline-strong);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.rating-chip:hover {
+  border-color: currentColor;
+}
+
+.system-line {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 0;
+  font-family: var(--font-mono);
+}
+
+.empty-state {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.testbed-hint {
+  border-top: 1px solid var(--hairline);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.error-action {
+  margin-top: 8px;
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: 240px minmax(0, 1fr);
@@ -1304,4 +1355,21 @@ button:disabled {
   .domain-form {
     grid-template-columns: 1fr;
   }
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.settings-modal {
+  width: min(560px, 92vw);
+  padding: 24px;
+  max-height: 80vh;
+  overflow-y: auto;
 }

@@ -72,7 +72,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         status: PHASE_TO_STATUS[action.detail.phase],
-        transcript: action.detail.transcript,
+        transcript: [...action.detail.transcript],
         questionsAsked: action.detail.question_count,
         maxQuestions: action.detail.max_questions,
         scalar: action.detail.scalar,

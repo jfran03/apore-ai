@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chatReducer, initialChatState, type ChatState } from './machine';
-import type { QuestionResponse, TurnResponse, WorkspaceSessionDetail } from '../api/types';
+import type { QuestionResponse, TranscriptEvent, TurnResponse, WorkspaceSessionDetail } from '../api/types';
 
 const question: QuestionResponse = {
   question_number: 1,
@@ -57,6 +57,17 @@ describe('chatReducer', () => {
       .toBe('complete');
   });
 
+  it('copies loaded transcript events without sharing the detail array', () => {
+    const transcript: TranscriptEvent[] = [{ type: 'system', ts: '', text: 'loaded' }];
+    const loaded = chatReducer(initialChatState(), {
+      type: 'detail_loaded',
+      detail: { ...detail('awaiting_answer'), transcript },
+    });
+
+    expect(loaded.transcript).toEqual(transcript);
+    expect(loaded.transcript).not.toBe(transcript);
+  });
+
   it('runs the happy path: question -> answer -> graded -> rating -> reflection -> continue -> next question', () => {
     let state: ChatState = chatReducer(initialChatState(), {
       type: 'detail_loaded',
@@ -108,6 +119,15 @@ describe('chatReducer', () => {
     state = chatReducer(state, { type: 'continue_sent' });
     state = chatReducer(state, { type: 'turn_result', result: turn('session_complete'), localEvents: [] });
     expect(state.status).toBe('complete');
+  });
+
+  it('maps in-question turn results back to awaiting_answer', () => {
+    const state = chatReducer(initialChatState(), { type: 'detail_loaded', detail: detail('awaiting_answer') });
+
+    for (const phase of ['dialogue', 'skip_prompt'] as const) {
+      expect(chatReducer(state, { type: 'turn_result', result: turn(phase), localEvents: [] }).status)
+        .toBe('awaiting_answer');
+    }
   });
 
   it('request failure preserves recovery status', () => {

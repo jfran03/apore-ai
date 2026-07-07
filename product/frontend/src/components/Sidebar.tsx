@@ -3,22 +3,43 @@ import type { AppView } from '../types';
 
 interface SidebarProps {
   domains: WorkspaceDomain[];
+  domainsLoading: boolean;
+  domainsError: string | null;
   sessions: WorkspaceSessionSummary[];
+  sessionsLoading: boolean;
+  sessionsError: string | null;
   view: AppView;
   onNavigate: (view: AppView) => void;
 }
 
-export function Sidebar({ domains, sessions, view, onNavigate }: SidebarProps) {
+export function Sidebar({
+  domains,
+  domainsLoading,
+  domainsError,
+  sessions,
+  sessionsLoading,
+  sessionsError,
+  view,
+  onNavigate,
+}: SidebarProps) {
   const activeDomainId = view.kind === 'domain' ? view.domainId : null;
 
   return (
     <aside className="sidebar">
       <div className="domain-list">
-        {domains.length === 0 && (
+        {domainsError ? (
+          <p className="domain-meta" style={{ padding: '8px 4px' }}>
+            Could not load domains: {domainsError}
+          </p>
+        ) : domainsLoading && domains.length === 0 ? (
+          <p className="domain-meta" style={{ padding: '8px 4px' }}>
+            Loading domains...
+          </p>
+        ) : domains.length === 0 ? (
           <p className="domain-meta" style={{ padding: '8px 4px' }}>
             No domains yet. Create your first learning domain to get started.
           </p>
-        )}
+        ) : null}
 
         {domains.map((domain) => (
           <DomainCard
@@ -26,6 +47,8 @@ export function Sidebar({ domains, sessions, view, onNavigate }: SidebarProps) {
             domain={domain}
             active={domain.id === activeDomainId}
             sessions={domain.id === activeDomainId ? sessions : []}
+            sessionsLoading={sessionsLoading}
+            sessionsError={sessionsError}
             view={view}
             onNavigate={onNavigate}
           />
@@ -46,12 +69,16 @@ function DomainCard({
   domain,
   active,
   sessions,
+  sessionsLoading,
+  sessionsError,
   view,
   onNavigate,
 }: {
   domain: WorkspaceDomain;
   active: boolean;
   sessions: WorkspaceSessionSummary[];
+  sessionsLoading: boolean;
+  sessionsError: string | null;
   view: AppView;
   onNavigate: (view: AppView) => void;
 }) {
@@ -94,6 +121,20 @@ function DomainCard({
             <span>Session History</span>
             <span className="tree-count">{sessions.length}</span>
           </div>
+          {sessionsError && (
+            <div className="tree-row">
+              <span className="tree-icon">!</span>
+              <span>Could not load sessions: {sessionsError}</span>
+              <span />
+            </div>
+          )}
+          {sessionsLoading && (
+            <div className="tree-row">
+              <span className="tree-icon">...</span>
+              <span>Loading sessions...</span>
+              <span />
+            </div>
+          )}
           <button
             className={`tree-row${activeTab === 'chat' && activeSessionId === null ? ' is-active' : ''}`}
             onClick={() => open('chat')}

@@ -18,17 +18,23 @@ export function useDomains(backendOnline: boolean): DomainsState {
   const refresh = useCallback(() => setTick((v) => v + 1), []);
 
   useEffect(() => {
-    if (!backendOnline) return;
+    if (!backendOnline) {
+      setDomains([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
+    setError(null);
     listDomains()
       .then((result) => {
         if (cancelled) return;
         setDomains(result.domains);
-        setError(null);
       })
       .catch((err) => {
         if (cancelled) return;
+        setDomains([]);
         setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {

@@ -21,7 +21,7 @@ export function App() {
 
   // First load: land on the first usable domain, else the create screen.
   useEffect(() => {
-    if (initialized || domainsState.loading || backend.status !== 'online') return;
+    if (initialized || domainsState.loading || domainsState.error || backend.status !== 'online') return;
     const first = domainsState.domains.find((d) => d.status !== 'invalid');
     if (first) {
       setView({ kind: 'domain', domainId: first.id, tab: 'chat', sessionId: null });
@@ -45,7 +45,11 @@ export function App() {
       <div className={`app-shell${isChatView ? ' is-chat-view' : ''}`}>
         <Sidebar
           domains={domainsState.domains}
+          domainsLoading={domainsState.loading}
+          domainsError={domainsState.error}
           sessions={sessionsState.sessions}
+          sessionsLoading={sessionsState.loading}
+          sessionsError={sessionsState.error}
           view={view}
           onNavigate={setView}
         />

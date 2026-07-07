@@ -20,18 +20,22 @@ export function useDomainSessions(domainId: string | null): DomainSessionsState 
   useEffect(() => {
     if (!domainId) {
       setSessions([]);
+      setLoading(false);
+      setError(null);
       return;
     }
     let cancelled = false;
+    setSessions([]);
     setLoading(true);
+    setError(null);
     listDomainSessions(domainId)
       .then((result) => {
         if (cancelled) return;
         setSessions(result.sessions);
-        setError(null);
       })
       .catch((err) => {
         if (cancelled) return;
+        setSessions([]);
         setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {

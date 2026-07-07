@@ -7,12 +7,6 @@ import pytest
 from apore.domains import store
 
 
-@pytest.fixture(autouse=True)
-def data_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("APORE_DATA_DIR", str(tmp_path))
-    return tmp_path
-
-
 def _create(name="Discrete Math"):
     return store.create_domain(
         name=name,

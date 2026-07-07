@@ -19,6 +19,11 @@ _FOCUS_SUFFIX = {
 
 
 def _parse_domain_chapter(knowledge_source: str) -> tuple[str, str]:
+    if knowledge_source.startswith("workspace:"):
+        rest = knowledge_source.split(":", 1)[1]
+        if "/" in rest:
+            domain_id, chapter_id = rest.split("/", 1)
+            return domain_id, chapter_id
     if knowledge_source.startswith("domain:"):
         rest = knowledge_source.split(":", 1)[1]
         if "/" in rest:

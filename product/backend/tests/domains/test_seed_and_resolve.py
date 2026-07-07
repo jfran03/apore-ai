@@ -7,12 +7,6 @@ import apore.api.app as app_module
 PROGRAM_ROOT = app_module.PROGRAM_ROOT
 
 
-@pytest.fixture(autouse=True)
-def data_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("APORE_DATA_DIR", str(tmp_path))
-    return tmp_path
-
-
 @pytest.fixture()
 def domain():
     return store.create_domain(

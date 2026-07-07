@@ -6,12 +6,6 @@ from apore.domains import sessionfile, store
 from apore.runtime.core import AssessmentResult, GeneratedQuestion, GradingResult
 
 
-@pytest.fixture(autouse=True)
-def data_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("APORE_DATA_DIR", str(tmp_path))
-    return tmp_path
-
-
 @pytest.fixture()
 def domain():
     return store.create_domain(

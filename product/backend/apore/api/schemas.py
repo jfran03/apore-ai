@@ -249,3 +249,38 @@ class WorkspaceDomainSummary(BaseModel):
 
 class WorkspaceDomainListResponse(BaseModel):
     domains: list[WorkspaceDomainSummary]
+
+
+class WorkspaceSessionCreateRequest(BaseModel):
+    chapter_id: str | None = None
+    focus_mode: str = "adaptive"
+    max_questions: int = Field(default=10, ge=1, le=50)
+
+
+class WorkspaceSessionSummary(BaseModel):
+    session_id: str
+    title: str
+    chapter_id: str
+    created_at: str
+    updated_at: str
+    question_count: int
+    max_questions: int
+    status: Literal["active", "complete", "invalid"]
+
+
+class WorkspaceSessionListResponse(BaseModel):
+    sessions: list[WorkspaceSessionSummary]
+
+
+class WorkspaceSessionDetailResponse(BaseModel):
+    session_id: str
+    title: str
+    chapter_id: str
+    knowledge_source: str
+    created_at: str
+    updated_at: str
+    question_count: int
+    max_questions: int
+    scalar: float
+    phase: Literal["idle", "awaiting_answer", "awaiting_rating", "reflection", "complete"]
+    transcript: list[dict]

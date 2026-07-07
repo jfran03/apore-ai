@@ -9,12 +9,6 @@ from apore.domains import store
 client = TestClient(app)
 
 
-@pytest.fixture(autouse=True)
-def data_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("APORE_DATA_DIR", str(tmp_path))
-    return tmp_path
-
-
 CREATE_BODY = {
     "name": "Discrete Math",
     "objective": "Proof-based CS foundations",

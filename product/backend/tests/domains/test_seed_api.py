@@ -40,3 +40,17 @@ def test_seed_unknown_source_404(domain_id, monkeypatch):
         f"/domains/{domain_id}/seed", json={"source_domain_id": "no-such"}
     )
     assert resp.status_code == 404
+
+
+def test_seed_non_post_method_404_without_testbed_env(domain_id, monkeypatch):
+    monkeypatch.delenv("APORE_TESTBED", raising=False)
+    resp = client.get(f"/domains/{domain_id}/seed")
+    assert resp.status_code == 404
+
+
+def test_seed_non_post_method_404_with_testbed_env(domain_id, monkeypatch):
+    # Even when the testbed gate is on, non-POST verbs on the seed path
+    # must remain indistinguishable from a missing route (no 405 leak).
+    monkeypatch.setenv("APORE_TESTBED", "1")
+    resp = client.get(f"/domains/{domain_id}/seed")
+    assert resp.status_code == 404

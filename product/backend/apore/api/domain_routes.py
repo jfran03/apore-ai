@@ -480,3 +480,33 @@ def seed_domain_endpoint(domain_id: str, body: SeedRequest) -> SeedResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return SeedResponse(chapters=chapters)
+
+
+def _seed_endpoint_not_found(domain_id: str) -> None:
+    # Without this, FastAPI/Starlette would resolve the path (since it's
+    # registered for POST) and return 405 for any other verb — leaking the
+    # route's existence even when the testbed gate is off. Registering the
+    # same path for the other common verbs and returning an unconditional
+    # 404 keeps this path indistinguishable from a missing route regardless
+    # of HTTP method or APORE_TESTBED state.
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+@domain_router.get("/{domain_id}/seed", include_in_schema=False)
+def seed_domain_endpoint_get(domain_id: str) -> None:
+    _seed_endpoint_not_found(domain_id)
+
+
+@domain_router.put("/{domain_id}/seed", include_in_schema=False)
+def seed_domain_endpoint_put(domain_id: str) -> None:
+    _seed_endpoint_not_found(domain_id)
+
+
+@domain_router.patch("/{domain_id}/seed", include_in_schema=False)
+def seed_domain_endpoint_patch(domain_id: str) -> None:
+    _seed_endpoint_not_found(domain_id)
+
+
+@domain_router.delete("/{domain_id}/seed", include_in_schema=False)
+def seed_domain_endpoint_delete(domain_id: str) -> None:
+    _seed_endpoint_not_found(domain_id)

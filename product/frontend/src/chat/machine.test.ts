@@ -47,6 +47,8 @@ describe('chatReducer', () => {
   it('maps loaded detail phases to statuses', () => {
     expect(chatReducer(initialChatState(), { type: 'detail_loaded', detail: detail('idle') }).status)
       .toBe('loading_question');
+    expect(chatReducer(initialChatState(), { type: 'detail_loaded', detail: detail('awaiting_answer') }).status)
+      .toBe('awaiting_answer');
     expect(chatReducer(initialChatState(), { type: 'detail_loaded', detail: detail('awaiting_rating') }).status)
       .toBe('awaiting_rating');
     expect(chatReducer(initialChatState(), { type: 'detail_loaded', detail: detail('reflection') }).status)
@@ -90,6 +92,64 @@ describe('chatReducer', () => {
     state = chatReducer(state, { type: 'continue_sent' });
     state = chatReducer(state, { type: 'turn_result', result: turn('completed'), localEvents: [] });
     expect(state.status).toBe('loading_question');
+  });
+
+  it('maps dialogue and skip prompt turn results back to awaiting answer', () => {
+    const state = chatReducer(initialChatState(), { type: 'detail_loaded', detail: detail('awaiting_answer') });
+
+    expect(chatReducer(state, {
+      type: 'turn_result',
+      result: turn('dialogue'),
+      localEvents: [],
+    }).status).toBe('awaiting_answer');
+
+    expect(chatReducer(state, {
+      type: 'turn_result',
+      result: turn('skip_prompt'),
+      localEvents: [],
+    }).status).toBe('awaiting_answer');
+  });
+
+  it('preserves scalar when turn result has no new difficulty', () => {
+    const state: ChatState = { ...initialChatState(), scalar: 0.72 };
+
+    const next = chatReducer(state, {
+      type: 'turn_result',
+      result: turn('dialogue', { new_difficulty: null }),
+      localEvents: [],
+    });
+
+    expect(next.scalar).toBe(0.72);
+  });
+
+  it('rating_sent preserves recovery status without appending optimistic transcript events', () => {
+    const state: ChatState = {
+      ...initialChatState(),
+      status: 'awaiting_rating',
+      transcript: [{ type: 'tutor_message', ts: '', text: 'feedback' }],
+    };
+
+    const next = chatReducer(state, { type: 'rating_sent', rating: 'ok' });
+
+    expect(next.status).toBe('working');
+    expect(next.errorRecovery).toBe('awaiting_rating');
+    expect(next.transcript).toHaveLength(1);
+    expect(next.transcript).toEqual(state.transcript);
+  });
+
+  it('continue_sent preserves recovery status without appending optimistic transcript events', () => {
+    const state: ChatState = {
+      ...initialChatState(),
+      status: 'reflection',
+      transcript: [{ type: 'rating', ts: '', rating: 'ok', reward: 0.4, new_difficulty: 0.55 }],
+    };
+
+    const next = chatReducer(state, { type: 'continue_sent' });
+
+    expect(next.status).toBe('working');
+    expect(next.errorRecovery).toBe('reflection');
+    expect(next.transcript).toHaveLength(1);
+    expect(next.transcript).toEqual(state.transcript);
   });
 
   it('session_complete ends the session', () => {

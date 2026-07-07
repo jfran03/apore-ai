@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createDomainSession, seedDomain } from '../../api/client';
 import type { TranscriptEvent, WorkspaceDomain } from '../../api/types';
 import type { BackendState } from '../../hooks/useBackend';
@@ -27,11 +27,13 @@ function NewSessionStarter({ domain, backend, onSessionCreated }: ChatViewProps)
   const [chapterId, setChapterId] = useState(readyChapters[0]?.id ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestGenerationRef = useRef(0);
   const selectedChapterId = readyChapters.some((chapter) => chapter.id === chapterId)
     ? chapterId
     : readyChapters[0]?.id ?? '';
 
   useEffect(() => {
+    requestGenerationRef.current += 1;
     setChapterId(readyChapters[0]?.id ?? '');
     setBusy(false);
     setError(null);
@@ -51,6 +53,7 @@ function NewSessionStarter({ domain, backend, onSessionCreated }: ChatViewProps)
   }
 
   async function start() {
+    const generation = requestGenerationRef.current;
     setBusy(true);
     setError(null);
 
@@ -58,10 +61,14 @@ function NewSessionStarter({ domain, backend, onSessionCreated }: ChatViewProps)
       const created = await createDomainSession(domain.id, {
         chapter_id: selectedChapterId || undefined,
       });
-      onSessionCreated(created.session_id);
+      if (requestGenerationRef.current === generation) {
+        onSessionCreated(created.session_id);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setBusy(false);
+      if (requestGenerationRef.current === generation) {
+        setError(err instanceof Error ? err.message : String(err));
+        setBusy(false);
+      }
     }
   }
 

@@ -215,3 +215,37 @@ class QuestionBankGenerateStatus(BaseModel):
     path: str | None = None
     error: str | None = None
     started_at: str | None = None
+
+
+class WorkspaceDomainCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    objective: str = ""
+    teaching_style: str = "socratic"
+    teaching_prompt: str = ""
+    model_preference: str = "auto"
+
+
+class WorkspaceChapterSummary(BaseModel):
+    id: str
+    has_concept_graph: bool
+    wiki_count: int
+    has_question_bank: bool
+
+
+class WorkspaceDomainSummary(BaseModel):
+    id: str
+    name: str
+    objective: str
+    teaching_style: str
+    teaching_prompt: str
+    model_preference: str
+    created_at: str
+    status: Literal["ready", "empty", "invalid"]
+    reason: str | None = None
+    chapters: list[WorkspaceChapterSummary] = []
+    session_count: int = 0
+    source_files: list[str] = []
+
+
+class WorkspaceDomainListResponse(BaseModel):
+    domains: list[WorkspaceDomainSummary]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from apore.api.domain_routes import domain_router
 from apore.api.session_flow import (  # noqa: F401 - re-exported for tests/compat
     PendingGrading,
     ReflectionState,
@@ -93,11 +95,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(domain_router)
+
 
 @app.get("/health")
 def health() -> dict:
     """Lightweight reachability check used by the desktop shell on startup."""
-    return {"status": "ok", "service": "apore-backend", "version": "0.1.0"}
+    return {
+        "status": "ok",
+        "service": "apore-backend",
+        "version": "0.1.0",
+        "testbed": os.environ.get("APORE_TESTBED") == "1",
+    }
 
 
 def _normalize_knowledge_source(body: CreateSessionRequest) -> str:

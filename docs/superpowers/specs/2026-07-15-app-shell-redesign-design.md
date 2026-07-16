@@ -93,7 +93,10 @@ Top → bottom:
   (`knowledge_source`, format `domain:{domainId}/{chapterId}`).
 - Switching domains in the sidebar updates the domain part; the chapter part
   is set per-session by the New Session flow.
-- Study and Questions read domain/chapter from this context. Study's
+- Study reads domain/chapter from this context. Questions keeps its own
+  knowledge-source selector for now — it reads/writes the same localStorage
+  key, so it follows sidebar domain switches on its next mount (live context
+  wiring deferred). Study's
   in-page domain/chapter dropdowns are removed (phase 1 for the domain
   dropdown; the chapter picker moves into the New Session flow).
 - Sessions whose `knowledge_source` is not `domain:*` (e.g. fixtures) group

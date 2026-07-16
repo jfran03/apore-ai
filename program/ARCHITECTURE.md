@@ -6,7 +6,7 @@ This document explains the high-level architecture of the Apore prototype runtim
 
 ```mermaid
 flowchart LR
-    U[User Browser] --> FE["React Client\nclient/src"]
+    U[User Browser] --> FE["React Client\nfrontend/src"]
 
     FE -->|HTTP JSON| API["FastAPI API Layer\napore/api/app.py"]
     FE -->|Provider/Setup actions| API
@@ -59,7 +59,7 @@ flowchart LR
 
 ## Runtime Boundaries
 
-- **Client (`client/src`)**
+- **Client (`frontend/src`)**
   - React UI for setup, settings, and the study loop.
   - Calls backend APIs for sessions, questions, turns, and setup/provider operations.
 

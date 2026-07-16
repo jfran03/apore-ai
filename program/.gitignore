@@ -1,11 +1,11 @@
 .fixtures/
-domains/**/sources/**
+backend/domains/**/sources/**
 __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
 dist/
 *.egg-info/
-client/node_modules/
-client/dist/
+frontend/node_modules/
+frontend/dist/
 .apore/

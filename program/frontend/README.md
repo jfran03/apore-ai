@@ -31,7 +31,7 @@ npm run tauri:build    # produces installer in src-tauri/target/release/bundle/
 **Dev mode (app + API in two terminals):**
 ```
 Terminal 1: cd program && uvicorn apore.api.app:app --reload --port 8000
-Terminal 2: cd program/client && npm run tauri:dev
+Terminal 2: cd program/frontend && npm run tauri:dev
 ```
 
 ## API base URL

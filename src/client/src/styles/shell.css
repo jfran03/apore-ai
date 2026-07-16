@@ -224,3 +224,64 @@
   color: var(--color-ink);
   text-decoration: none;
 }
+
+/* Sidebar session histories */
+.sidebar__sessions {
+  list-style: none;
+  padding-left: var(--spacing-base);
+}
+
+.sidebar__session {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-height: 44px;
+  padding: 0 var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-caption);
+  color: var(--color-body);
+}
+
+.sidebar__session:hover {
+  background-color: var(--color-hairline-soft);
+  color: var(--color-ink);
+  text-decoration: none;
+}
+
+.sidebar__session-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar__session-chapter {
+  color: var(--color-body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sidebar__session-age {
+  color: var(--color-body);
+  white-space: nowrap;
+}
+
+.sidebar__more {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--spacing-sm);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-caption);
+  color: var(--color-body);
+}
+
+.sidebar__more:hover {
+  background-color: var(--color-hairline-soft);
+  color: var(--color-ink);
+}

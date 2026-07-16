@@ -100,3 +100,9 @@ def test_get_transcript_invalid_id_404_no_traversal(sessions_dir):
     # Not a UUID -> rejected before any filesystem access
     resp = client.get("/sessions/..%2F..%2Fpyproject/transcript")
     assert resp.status_code == 404
+
+
+def test_get_transcript_non_uuid_id_404(sessions_dir):
+    # Single-segment non-UUID id: reaches the handler and exercises its UUID guard
+    resp = client.get("/sessions/not-a-uuid/transcript")
+    assert resp.status_code == 404

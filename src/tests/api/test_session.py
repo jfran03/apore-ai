@@ -286,6 +286,31 @@ def test_config_get():
     assert "active_provider" in data
 
 
+def test_config_get_testbed_stub_provider(monkeypatch):
+    monkeypatch.setenv("APORE_TESTBED", "1")
+    monkeypatch.setenv("APORE_TESTBED_PROVIDER", "stub")
+
+    resp = client.get("/config/provider")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["active_provider"] == "stub"
+    assert data["active_model"] == "stub-model"
+
+
+def test_require_provider_uses_testbed_stub(monkeypatch):
+    import apore.api.app as app_module
+    from apore.providers.stub import StubProvider
+
+    monkeypatch.setenv("APORE_TESTBED", "1")
+    monkeypatch.setenv("APORE_TESTBED_PROVIDER", "stub")
+
+    provider, model = app_module._require_provider()
+
+    assert isinstance(provider, StubProvider)
+    assert model == "stub-model"
+
+
 def test_config_put():
     resp = client.put(
         "/config/provider",

@@ -215,3 +215,14 @@ class QuestionBankGenerateStatus(BaseModel):
     path: str | None = None
     error: str | None = None
     started_at: str | None = None
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    title: str
+    created_at: str
+    knowledge_source: str
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionSummary]

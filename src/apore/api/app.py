@@ -27,7 +27,9 @@ from apore.api.schemas import (
     QuestionBankResponse,
     QuestionRequest,
     QuestionResponse,
+    SessionListResponse,
     SessionStateResponse,
+    SessionSummary,
     StubCompileResponse,
     TurnRequest,
     TurnResponse,
@@ -79,6 +81,7 @@ from apore.sim.runner import run_sessions as sim_run_sessions
 from apore.sim.student import StudentProfile
 
 PROGRAM_ROOT = Path(__file__).resolve().parent.parent.parent
+SESSIONS_DIR = PROGRAM_ROOT / "sessions"
 
 
 @dataclass
@@ -384,7 +387,7 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     session_id = str(uuid.uuid4())
-    state_path = PROGRAM_ROOT / "sessions" / f"{session_id}.md"
+    state_path = SESSIONS_DIR / f"{session_id}.md"
     state_path.parent.mkdir(parents=True, exist_ok=True)
 
     fixture_commit = _upstream_commit_for_knowledge_source(knowledge_source)
@@ -729,6 +732,35 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
 def get_session_state(session_id: str) -> SessionStateResponse:
     sess = _get_session(session_id)
     return _session_state_response(sess)
+
+
+@app.get("/sessions", response_model=SessionListResponse)
+def list_sessions() -> SessionListResponse:
+    """Summaries of persisted sessions, newest first (spec: sidebar histories)."""
+    summaries: list[SessionSummary] = []
+    if SESSIONS_DIR.is_dir():
+        for path in SESSIONS_DIR.glob("*.md"):
+            try:
+                uuid.UUID(path.stem)
+            except ValueError:
+                continue
+            try:
+                meta = state.read_session_meta(path)
+                title = state.read_title(path)
+            except OSError:
+                continue
+            if not all(k in meta for k in ("id", "created_at", "knowledge_source")):
+                continue
+            summaries.append(
+                SessionSummary(
+                    session_id=meta["id"],
+                    title=title,
+                    created_at=meta["created_at"],
+                    knowledge_source=meta["knowledge_source"],
+                )
+            )
+    summaries.sort(key=lambda s: s.created_at, reverse=True)
+    return SessionListResponse(sessions=summaries)
 
 
 @app.get("/setup/knowledge", response_model=KnowledgeCatalogResponse)

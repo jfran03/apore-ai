@@ -4,10 +4,11 @@ import {
   fetchQuestion,
   postTurn,
   getSessionState,
-  getKnowledgeCatalog,
   getStoredKnowledgeSource,
+  setStoredKnowledgeSource,
 } from '../api/client';
-import type { KnowledgeCatalog, QuestionResponse, TurnResponse } from '../api/types';
+import type { QuestionResponse, TurnResponse } from '../api/types';
+import { parseKnowledgeSource, useActiveDomain } from '../shell/ActiveDomainContext';
 import { QuestionCard } from '../components/QuestionCard';
 import { QuestionHistoryCard, type HistoryRecord } from '../components/QuestionHistoryCard';
 import {
@@ -68,14 +69,6 @@ interface SessionCompleteSummary {
 
 const LENGTH_PRESETS = [5, 10, 15] as const;
 
-function parseKnowledgeSource(source: string): { domainId: string; chapterId: string } | null {
-  if (!source.startsWith('domain:')) return null;
-  const rest = source.slice('domain:'.length);
-  const [domainId, chapterId] = rest.split('/', 2);
-  if (!domainId || !chapterId) return null;
-  return { domainId, chapterId };
-}
-
 function chapterStudyReady(chapter: {
   has_concept_graph: boolean;
   has_question_bank: boolean;
@@ -113,11 +106,9 @@ function gradeFromTurn(res: TurnResponse): GradeResult {
 }
 
 export function Study() {
-  const [catalog, setCatalog] = useState<KnowledgeCatalog | null>(null);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const { activeDomain, catalogError } = useActiveDomain();
 
   const stored = parseKnowledgeSource(getStoredKnowledgeSource());
-  const [domainId, setDomainId] = useState(stored?.domainId ?? 'discrete-math');
   const [chapterId, setChapterId] = useState(stored?.chapterId ?? '01-set-theory');
   const [focusMode, setFocusMode] = useState<FocusMode>('adaptive');
   const [sessionLength, setSessionLength] = useState(10);
@@ -133,32 +124,13 @@ export function Study() {
   const pendingAfterReveal = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    getKnowledgeCatalog()
-      .then(setCatalog)
-      .catch((err) =>
-        setCatalogError(err instanceof Error ? err.message : 'Failed to load catalog'),
-      );
-  }, []);
-
-  useEffect(() => {
-    if (!catalog?.domains.length) return;
-    const domainExists = catalog.domains.some((d) => d.id === domainId);
-    if (!domainExists) {
-      setDomainId(catalog.domains[0].id);
+    if (!activeDomain?.chapters.length) return;
+    if (!activeDomain.chapters.some((c) => c.id === chapterId)) {
+      setChapterId(activeDomain.chapters[0].id);
     }
-  }, [catalog, domainId]);
+  }, [activeDomain, chapterId]);
 
-  useEffect(() => {
-    const domain = catalog?.domains.find((d) => d.id === domainId);
-    if (!domain?.chapters.length) return;
-    const chapterExists = domain.chapters.some((c) => c.id === chapterId);
-    if (!chapterExists) {
-      setChapterId(domain.chapters[0].id);
-    }
-  }, [catalog, domainId, chapterId]);
-
-  const selectedDomain = catalog?.domains.find((d) => d.id === domainId);
-  const selectedChapter = selectedDomain?.chapters.find((c) => c.id === chapterId);
+  const selectedChapter = activeDomain?.chapters.find((c) => c.id === chapterId);
   const canStart =
     selectedChapter != null && chapterStudyReady(selectedChapter) && sessionLength >= 1 && sessionLength <= 50;
 
@@ -196,6 +168,7 @@ export function Study() {
 
   const handleStartSession = useCallback(async () => {
     if (!selectedChapter || !canStart) return;
+    setStoredKnowledgeSource(selectedChapter.knowledge_source);
     setStartLoading(true);
     setStartError(null);
     setSessionComplete(null);
@@ -537,35 +510,18 @@ export function Study() {
         <div className="study-preamble">
           <h1 className="study-start__heading">Study Session</h1>
           <p className="study-start__sub">
-            Choose what to study, how to focus, and how long the session should run.
+            New session in <strong>{activeDomain?.id ?? '…'}</strong> — choose a chapter,
+            focus, and session length.
           </p>
 
           {catalogError && <p className="study-start__error">{catalogError}</p>}
-
-          <section className="setup-section" aria-labelledby="study-domain-heading">
-            <h2 id="study-domain-heading" className="setup-section__heading">
-              Domain
-            </h2>
-            <select
-              className="setup-input study-preamble__select"
-              value={domainId}
-              onChange={(e) => setDomainId(e.target.value)}
-              disabled={!catalog || startLoading}
-            >
-              {catalog?.domains.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.id}
-                </option>
-              ))}
-            </select>
-          </section>
 
           <section className="setup-section" aria-labelledby="study-chapter-heading">
             <h2 id="study-chapter-heading" className="setup-section__heading">
               Chapter
             </h2>
             <div className="setup-radio" role="radiogroup" aria-label="Chapter">
-              {selectedDomain?.chapters.map((c) => {
+              {activeDomain?.chapters.map((c) => {
                 const ready = chapterStudyReady(c);
                 return (
                   <label key={c.id} className={!ready ? 'study-preamble__disabled' : undefined}>

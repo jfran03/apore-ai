@@ -9,9 +9,6 @@ export function Home() {
         <Link to="/study" className="btn btn--primary">
           Start studying
         </Link>
-        <Link to="/settings" className="btn btn--ghost">
-          Settings
-        </Link>
       </div>
     </main>
   );

@@ -1,5 +1,6 @@
 import { Link, NavLink } from 'react-router-dom';
 import { useActiveDomain } from './ActiveDomainContext';
+import { SettingsPopover } from './SettingsPopover';
 
 const MENU_ITEMS = [
   { to: '/study', label: 'Study' },
@@ -45,7 +46,9 @@ export function TopBar({ collapsed, onToggleSidebar }: TopBarProps) {
           </NavLink>
         ))}
       </nav>
-      <div className="topbar__right">{/* Settings cog lands here in Task 8 */}</div>
+      <div className="topbar__right">
+        <SettingsPopover />
+      </div>
     </header>
   );
 }

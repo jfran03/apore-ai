@@ -5,7 +5,6 @@ import { ActiveDomainProvider } from './shell/ActiveDomainContext';
 import { Home } from './pages/Home';
 import { Study } from './pages/Study';
 import { Setup } from './pages/Setup';
-import { Settings } from './pages/Settings';
 import { Questions } from './pages/Questions';
 import { SessionTranscriptPage } from './pages/SessionTranscript';
 import './styles/global.css';
@@ -23,7 +22,6 @@ export function App() {
               <Route path="/questions" element={<Questions />} />
               <Route path="/study" element={<Study />} />
               <Route path="/sessions/:id" element={<SessionTranscriptPage />} />
-              <Route path="/settings" element={<Settings />} />
               <Route
                 path="/runs"
                 element={<PlaceholderPage title="Runs" note="Run history — coming soon." />}

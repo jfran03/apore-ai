@@ -63,3 +63,17 @@
   font-size: var(--font-size-body-md);
   color: var(--color-muted);
 }
+
+/* Session transcript (read-only) */
+.transcript {
+  margin-top: var(--spacing-lg);
+  overflow-x: auto;
+}
+
+.transcript__pre {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-code);
+  line-height: 1.6;
+  color: var(--color-ink);
+  white-space: pre-wrap;
+}

@@ -7,6 +7,7 @@ import { Study } from './pages/Study';
 import { Setup } from './pages/Setup';
 import { Settings } from './pages/Settings';
 import { Questions } from './pages/Questions';
+import { SessionTranscriptPage } from './pages/SessionTranscript';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -21,6 +22,7 @@ export function App() {
               <Route path="/setup" element={<Setup />} />
               <Route path="/questions" element={<Questions />} />
               <Route path="/study" element={<Study />} />
+              <Route path="/sessions/:id" element={<SessionTranscriptPage />} />
               <Route path="/settings" element={<Settings />} />
               <Route
                 path="/runs"

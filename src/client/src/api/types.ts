@@ -185,3 +185,24 @@ export interface QuestionBankGenerateStatus {
   error: string | null;
   started_at: string | null;
 }
+
+export interface SessionSummary {
+  session_id: string;
+  title: string;
+  created_at: string;
+  knowledge_source: string;
+}
+
+export interface SessionListResponse {
+  sessions: SessionSummary[];
+}
+
+export interface SessionTranscript {
+  session_id: string;
+  title: string;
+  created_at: string;
+  knowledge_source: string;
+  focus_mode: string;
+  max_questions: number;
+  body: string;
+}

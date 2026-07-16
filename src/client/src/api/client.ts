@@ -17,6 +17,8 @@ import type {
   QuestionBankEntry,
   QuestionBankResponse,
   QuestionBankGenerateStatus,
+  SessionListResponse,
+  SessionTranscript,
 } from './types';
 
 const KNOWLEDGE_SOURCE_KEY = 'apore.knowledge_source';
@@ -233,4 +235,12 @@ export async function deleteQuestionBankEntry(
     `${questionBankBasePath(knowledgeSource)}/questions/${encodeURIComponent(questionId)}`,
     { method: 'DELETE' },
   );
+}
+
+export async function listSessions(): Promise<SessionListResponse> {
+  return apiFetch<SessionListResponse>('/sessions');
+}
+
+export async function getSessionTranscript(sessionId: string): Promise<SessionTranscript> {
+  return apiFetch<SessionTranscript>(`/sessions/${encodeURIComponent(sessionId)}/transcript`);
 }

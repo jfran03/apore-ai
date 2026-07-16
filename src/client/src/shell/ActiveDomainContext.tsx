@@ -53,7 +53,12 @@ export function ActiveDomainProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!catalog?.domains.length) return;
     if (!activeDomainId || !catalog.domains.some((d) => d.id === activeDomainId)) {
-      setActiveDomainIdState(catalog.domains[0].id);
+      const fallback = catalog.domains[0];
+      setActiveDomainIdState(fallback.id);
+      const firstChapter = fallback.chapters[0];
+      if (firstChapter) {
+        setStoredKnowledgeSource(firstChapter.knowledge_source);
+      }
     }
   }, [catalog, activeDomainId]);
 

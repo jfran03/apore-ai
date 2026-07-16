@@ -30,6 +30,7 @@ from apore.api.schemas import (
     SessionListResponse,
     SessionStateResponse,
     SessionSummary,
+    SessionTranscriptResponse,
     StubCompileResponse,
     TurnRequest,
     TurnResponse,
@@ -761,6 +762,32 @@ def list_sessions() -> SessionListResponse:
             )
     summaries.sort(key=lambda s: s.created_at, reverse=True)
     return SessionListResponse(sessions=summaries)
+
+
+@app.get("/sessions/{session_id}/transcript", response_model=SessionTranscriptResponse)
+def get_session_transcript(session_id: str) -> SessionTranscriptResponse:
+    """Read-only transcript of a persisted session (works after server restart)."""
+    try:
+        uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    path = SESSIONS_DIR / f"{session_id}.md"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Session not found")
+    meta = state.read_session_meta(path)
+    try:
+        max_questions = int(meta.get("max_questions", "0"))
+    except ValueError:
+        max_questions = 0
+    return SessionTranscriptResponse(
+        session_id=session_id,
+        title=state.read_title(path),
+        created_at=meta.get("created_at", ""),
+        knowledge_source=meta.get("knowledge_source", ""),
+        focus_mode=meta.get("focus_mode", "adaptive"),
+        max_questions=max_questions,
+        body=path.read_text(encoding="utf-8"),
+    )
 
 
 @app.get("/setup/knowledge", response_model=KnowledgeCatalogResponse)

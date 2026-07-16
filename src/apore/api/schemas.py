@@ -226,3 +226,13 @@ class SessionSummary(BaseModel):
 
 class SessionListResponse(BaseModel):
     sessions: list[SessionSummary]
+
+
+class SessionTranscriptResponse(BaseModel):
+    session_id: str
+    title: str
+    created_at: str
+    knowledge_source: str
+    focus_mode: str
+    max_questions: int
+    body: str

@@ -70,3 +70,33 @@ def test_list_sessions_empty_dir(sessions_dir):
     resp = client.get("/sessions")
     assert resp.status_code == 200
     assert resp.json() == {"sessions": []}
+
+
+def test_get_transcript_returns_meta_and_body(sessions_dir):
+    session_id = _write_session(
+        sessions_dir, title="Set Theory Warm-up", created_at="2026-07-01T00:00:00+00:00"
+    )
+
+    resp = client.get(f"/sessions/{session_id}/transcript")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_id"] == session_id
+    assert data["title"] == "Set Theory Warm-up"
+    assert data["created_at"] == "2026-07-01T00:00:00+00:00"
+    assert data["knowledge_source"] == "domain:_pytest/01-intro"
+    assert data["focus_mode"] == "adaptive"
+    assert data["max_questions"] == 10
+    assert "## Session" in data["body"]
+    assert "## Question Log" in data["body"]
+
+
+def test_get_transcript_unknown_uuid_404(sessions_dir):
+    resp = client.get(f"/sessions/{uuid.uuid4()}/transcript")
+    assert resp.status_code == 404
+
+
+def test_get_transcript_invalid_id_404_no_traversal(sessions_dir):
+    # Not a UUID -> rejected before any filesystem access
+    resp = client.get("/sessions/..%2F..%2Fpyproject/transcript")
+    assert resp.status_code == 404

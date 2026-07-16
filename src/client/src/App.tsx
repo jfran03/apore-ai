@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { MotionConfig } from 'framer-motion';
-import { Nav } from './components/Nav';
+import { AppShell } from './shell/AppShell';
+import { ActiveDomainProvider } from './shell/ActiveDomainContext';
 import { Home } from './pages/Home';
 import { Study } from './pages/Study';
 import { Setup } from './pages/Setup';
@@ -13,16 +14,25 @@ export function App() {
   return (
     <MotionConfig reducedMotion="user">
       <BrowserRouter>
-        <Nav />
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/setup" element={<Setup />} />
-          <Route path="/questions" element={<Questions />} />
-          <Route path="/study" element={<Study />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/runs" element={<PlaceholderPage title="Runs" note="Run history — coming soon." />} />
-          <Route path="/graph" element={<PlaceholderPage title="Graph" note="Knowledge graph — coming soon." />} />
-        </Routes>
+        <ActiveDomainProvider>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/" element={<Home />} />
+              <Route path="/setup" element={<Setup />} />
+              <Route path="/questions" element={<Questions />} />
+              <Route path="/study" element={<Study />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route
+                path="/runs"
+                element={<PlaceholderPage title="Runs" note="Run history — coming soon." />}
+              />
+              <Route
+                path="/graph"
+                element={<PlaceholderPage title="Graph" note="Knowledge graph — coming soon." />}
+              />
+            </Route>
+          </Routes>
+        </ActiveDomainProvider>
       </BrowserRouter>
     </MotionConfig>
   );

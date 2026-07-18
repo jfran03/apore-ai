@@ -1,5 +1,6 @@
-/* App shell: top bar + collapsible docked sidebar + scrollable content */
+/* App shell: floating top-bar islands over a full-height scrollable content */
 .shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -19,30 +20,53 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  padding-top: calc(56px + var(--spacing-base));
 }
 
-/* Top bar */
+/* Top bar — transparent overlay; only the islands inside catch pointer events */
 .topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   height: 56px;
-  flex-shrink: 0;
   padding: 0 var(--spacing-base);
-  background-color: var(--color-canvas);
-  border-bottom: 1px solid var(--color-hairline);
+  background: transparent;
+  pointer-events: none;
 }
 
+.topbar > * {
+  pointer-events: auto;
+}
+
+/* Floating islands: left cluster, centered nav pill, right cluster */
 .topbar__left,
+.topbar__menu,
 .topbar__right {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  flex: 1;
+  gap: var(--spacing-xxs);
   min-width: 0;
+  padding: var(--spacing-xxs);
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 2px 8px rgba(38, 37, 30, 0.06);
 }
 
-.topbar__right {
-  justify-content: flex-end;
+.topbar__left {
+  gap: var(--spacing-xs);
+  padding-right: var(--spacing-sm);
+}
+
+.topbar__menu {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .topbar__hamburger,
@@ -88,16 +112,6 @@
   text-overflow: ellipsis;
 }
 
-.topbar__menu {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xxs);
-  padding: var(--spacing-xxs);
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-md);
-  background-color: var(--color-surface-card);
-}
-
 .topbar__link {
   display: flex;
   align-items: center;
@@ -127,6 +141,7 @@
   width: 264px;
   flex-shrink: 0;
   min-height: 0;
+  padding-top: 56px;
   border-right: 1px solid var(--color-hairline);
   background-color: var(--color-canvas-soft);
 }

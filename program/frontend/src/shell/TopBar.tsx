@@ -1,5 +1,4 @@
-import { Link, NavLink } from 'react-router-dom';
-import { useActiveDomain } from './ActiveDomainContext';
+import { NavLink } from 'react-router-dom';
 import { SettingsPopover } from './SettingsPopover';
 
 const MENU_ITEMS = [
@@ -15,7 +14,6 @@ interface TopBarProps {
 }
 
 export function TopBar({ collapsed, onToggleSidebar }: TopBarProps) {
-  const { activeDomainId } = useActiveDomain();
   return (
     <header className="topbar">
       <div className="topbar__left">
@@ -28,10 +26,6 @@ export function TopBar({ collapsed, onToggleSidebar }: TopBarProps) {
         >
           ☰
         </button>
-        <Link to="/" className="topbar__brand">
-          Apore
-        </Link>
-        <span className="topbar__domain">{activeDomainId ?? '—'}</span>
       </div>
       <nav className="topbar__menu" aria-label="Main navigation">
         {MENU_ITEMS.map(({ to, label }) => (

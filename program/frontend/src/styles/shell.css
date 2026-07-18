@@ -20,7 +20,7 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding-top: calc(56px + var(--spacing-base));
+  padding-top: calc(56px + var(--spacing-lg));
 }
 
 /* Top bar — transparent overlay; only the islands inside catch pointer events */
@@ -54,19 +54,57 @@
   padding: var(--spacing-xxs);
   background-color: var(--color-surface-card);
   border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   box-shadow: 0 2px 8px rgba(38, 37, 30, 0.06);
 }
 
 .topbar__left {
   gap: var(--spacing-xs);
-  padding-right: var(--spacing-sm);
+}
+
+/* Floating navigation popover anchored to the hamburger */
+.nav-popover {
+  position: relative;
+}
+
+.nav-popover__panel {
+  position: absolute;
+  top: calc(100% + var(--spacing-xs));
+  left: 0;
+  z-index: 20;
+  display: flex;
+  width: 264px;
+  max-height: calc(100dvh - 56px - var(--spacing-lg));
+  overflow: hidden;
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(38, 37, 30, 0.08);
+}
+
+.nav-popover__panel .sidebar {
+  flex: 1;
+  width: 100%;
+  padding-top: 0;
+  border-right: none;
+  background-color: transparent;
+}
+
+/* Centered stack: nav pill with the active-domain scope caption beneath it */
+.topbar__center {
+  position: absolute;
+  left: 50%;
+  top: var(--spacing-xxs);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xxs);
+  pointer-events: none;
 }
 
 .topbar__menu {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  pointer-events: auto;
 }
 
 .topbar__hamburger,
@@ -104,12 +142,15 @@
 }
 
 .topbar__domain {
-  font-size: var(--font-size-body-sm);
+  max-width: 240px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
   font-weight: var(--font-weight-medium);
   color: var(--color-body);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  pointer-events: auto;
 }
 
 .topbar__link {
@@ -217,6 +258,85 @@
   font-size: var(--font-size-caption);
   color: var(--color-semantic-error);
   padding: 0 var(--spacing-sm);
+}
+
+/* Domains loading skeleton */
+.sidebar__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-base);
+  padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+.sidebar__skeleton-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.sidebar__skeleton-domain {
+  height: 14px;
+  width: 45%;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-hairline-strong);
+  animation: sidebar-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.sidebar__skeleton-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding-left: var(--spacing-base);
+}
+
+.sidebar__skeleton-session {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-height: 24px;
+}
+
+.sidebar__skeleton-bone {
+  height: 10px;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-hairline);
+  animation: sidebar-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.sidebar__skeleton-bone--title {
+  flex: 1;
+}
+
+.sidebar__skeleton-bone--age {
+  width: 24px;
+}
+
+.sidebar__skeleton-group:nth-child(2) .sidebar__skeleton-bone,
+.sidebar__skeleton-group:nth-child(2) .sidebar__skeleton-domain {
+  animation-delay: 0.15s;
+}
+
+.sidebar__skeleton-group:nth-child(3) .sidebar__skeleton-bone,
+.sidebar__skeleton-group:nth-child(3) .sidebar__skeleton-domain {
+  animation-delay: 0.3s;
+}
+
+@keyframes sidebar-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__skeleton-domain,
+  .sidebar__skeleton-bone {
+    animation: none;
+    opacity: 0.7;
+  }
 }
 
 .sidebar__footer {
@@ -373,4 +493,105 @@
   color: var(--color-muted);
   border-top: 1px solid var(--color-hairline-soft);
   padding-top: var(--spacing-sm);
+}
+
+/* API key onboarding gate — full-viewport blocking overlay */
+.api-key-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-lg);
+  background-color: rgba(38, 37, 30, 0.32);
+  backdrop-filter: blur(2px);
+}
+
+.api-key-gate__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  width: 100%;
+  max-width: 440px;
+  padding: var(--spacing-xl);
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(38, 37, 30, 0.14);
+}
+
+.api-key-gate__title {
+  margin: 0;
+  font-size: var(--font-size-display-sm);
+  font-weight: var(--font-weight-regular);
+  letter-spacing: -0.011em;
+  color: var(--color-ink);
+}
+
+.api-key-gate__body {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  line-height: 1.5;
+  color: var(--color-body);
+}
+
+.api-key-gate__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xxs);
+  margin-top: var(--spacing-xs);
+}
+
+.api-key-gate__label {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-body);
+}
+
+.api-key-gate__input {
+  height: 44px;
+  padding: 0 var(--spacing-sm);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+  color: var(--color-ink);
+  background: var(--color-canvas-soft);
+  outline: none;
+  width: 100%;
+}
+
+.api-key-gate__input:focus {
+  border-color: var(--color-primary);
+}
+
+.api-key-gate__hint {
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+}
+
+.api-key-gate__hint--error {
+  color: var(--color-semantic-error);
+}
+
+.api-key-gate__error {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-semantic-error);
+}
+
+.api-key-gate__actions {
+  display: flex;
+  margin-top: var(--spacing-xs);
+}
+
+.api-key-gate__actions .btn {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-key-gate {
+    backdrop-filter: none;
+  }
 }

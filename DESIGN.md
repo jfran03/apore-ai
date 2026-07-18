@@ -14,8 +14,8 @@ colors:
   hairline: "#e6e5e0"
   hairline-soft: "#efeee8"
   hairline-strong: "#cfcdc4"
-  canvas: "#f7f7f4"
-  canvas-soft: "#fafaf7"
+  canvas: "#ebeae3"
+  canvas-soft: "#f3f2ec"
   surface-card: "#ffffff"
   surface-strong: "#e6e5e0"
   on-primary: "#ffffff"
@@ -305,8 +305,8 @@ The brand's strongest visual signature is the **AI-timeline pill palette**: five
 - **Cursor Orange Active** (`{colors.primary-active}` — #d04200): Press state.
 
 ### Surface
-- **Canvas** (`{colors.canvas}` — #f7f7f4): Warm cream page floor.
-- **Canvas Soft** (`{colors.canvas-soft}` — #fafaf7): IDE-pane background inside mockups.
+- **Canvas** (`{colors.canvas}` — #ebeae3): Warm cream page floor.
+- **Canvas Soft** (`{colors.canvas-soft}` — #f3f2ec): IDE-pane background inside mockups.
 - **Surface Card** (`{colors.surface-card}` — #ffffff): Pure white card surface — slight contrast against the cream canvas.
 - **Surface Strong** (`{colors.surface-strong}` — #e6e5e0): Badges, tag pills.
 
@@ -388,10 +388,10 @@ The system uses **hairline-only depth**. No drop shadows, no elevation tiers. Ca
 
 | Level | Treatment | Use |
 |---|---|---|
-| Flat (canvas) | `{colors.canvas}` (#f7f7f4) | Body bands, footer |
+| Flat (canvas) | `{colors.canvas}` (#ebeae3) | Body bands, footer |
 | Card | `{colors.surface-card}` (#ffffff) | Content cards |
 | Hairline border | 1px `{colors.hairline}` | Card outlines, dividers |
-| IDE pane | `{colors.canvas-soft}` (#fafaf7) | Inside IDE mockup cards |
+| IDE pane | `{colors.canvas-soft}` (#f3f2ec) | Inside IDE mockup cards |
 
 ### Decorative Depth
 - **IDE-mockup cards** are the only "elevated" element. White card on cream canvas with internal pane structure mimicking the actual Cursor editor.

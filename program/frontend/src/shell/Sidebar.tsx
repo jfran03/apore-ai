@@ -19,6 +19,26 @@ export function formatRelativeAge(iso: string): string {
   return `${Math.floor(days / 30)}mo`;
 }
 
+function DomainsSkeleton() {
+  return (
+    <div className="sidebar__skeleton" aria-busy="true" aria-hidden="true">
+      {[0, 1, 2].map((group) => (
+        <div key={group} className="sidebar__skeleton-group">
+          <div className="sidebar__skeleton-domain" />
+          <div className="sidebar__skeleton-sessions">
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="sidebar__skeleton-session">
+                <span className="sidebar__skeleton-bone sidebar__skeleton-bone--title" />
+                <span className="sidebar__skeleton-bone sidebar__skeleton-bone--age" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SessionRows({ sessions }: { sessions: SessionSummary[] }) {
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? sessions : sessions.slice(0, VISIBLE_SESSIONS);
@@ -55,72 +75,65 @@ function SessionRows({ sessions }: { sessions: SessionSummary[] }) {
 }
 
 export function Sidebar() {
-  const { catalog, catalogError, activeDomainId, setActiveDomainId } = useActiveDomain();
+  const { catalog, activeDomainId, setActiveDomainId } = useActiveDomain();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
 
   useEffect(() => {
     listSessions()
-      .then((res) => setSessions(res.sessions))
-      .catch((err) =>
-        setSessionsError(err instanceof Error ? err.message : 'Failed to load sessions'),
-      );
+      .then((res) => {
+        setSessions(res.sessions);
+        setSessionsLoaded(true);
+      })
+      .catch(() => {
+        // Keep the skeleton until a successful load; do not surface errors here.
+      });
   }, []);
 
   const grouped = useMemo(() => {
     const byDomain = new Map<string, SessionSummary[]>();
-    const other: SessionSummary[] = [];
     for (const s of sessions) {
       const parsed = parseKnowledgeSource(s.knowledge_source);
       if (parsed) {
         const list = byDomain.get(parsed.domainId) ?? [];
         list.push(s);
         byDomain.set(parsed.domainId, list);
-      } else {
-        other.push(s);
       }
     }
-    return { byDomain, other };
+    return byDomain;
   }, [sessions]);
+
+  const ready = catalog !== null && sessionsLoaded;
 
   return (
     <aside className="sidebar" aria-label="Learning domains">
       <div className="sidebar__top">
-        <Link to="/study" className="sidebar__new-session">
-          <span aria-hidden="true">⊕</span> New Session
+        <Link to="/setup" className="sidebar__new-session">
+          <span aria-hidden="true">⊕</span> New Domain
         </Link>
       </div>
       <div className="sidebar__section">
         <p className="sidebar__section-title">Domains</p>
-        {catalogError && <p className="sidebar__error">{catalogError}</p>}
-        {sessionsError && <p className="sidebar__error">{sessionsError}</p>}
-        <ul className="sidebar__domains">
-          {catalog?.domains.map((d) => (
-            <li key={d.id}>
-              <button
-                type="button"
-                className={`sidebar__domain${
-                  d.id === activeDomainId ? ' sidebar__domain--active' : ''
-                }`}
-                onClick={() => setActiveDomainId(d.id)}
-              >
-                {d.id}
-              </button>
-              <SessionRows sessions={grouped.byDomain.get(d.id) ?? []} />
-            </li>
-          ))}
-        </ul>
-        {grouped.other.length > 0 && (
-          <>
-            <p className="sidebar__section-title">Other</p>
-            <SessionRows sessions={grouped.other} />
-          </>
+        {ready ? (
+          <ul className="sidebar__domains">
+            {catalog.domains.map((d) => (
+              <li key={d.id}>
+                <button
+                  type="button"
+                  className={`sidebar__domain${
+                    d.id === activeDomainId ? ' sidebar__domain--active' : ''
+                  }`}
+                  onClick={() => setActiveDomainId(d.id)}
+                >
+                  {d.id}
+                </button>
+                <SessionRows sessions={grouped.get(d.id) ?? []} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <DomainsSkeleton />
         )}
-      </div>
-      <div className="sidebar__footer">
-        <Link to="/setup" className="sidebar__footer-link">
-          Setup
-        </Link>
       </div>
     </aside>
   );

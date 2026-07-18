@@ -22,6 +22,7 @@ import '../styles/setup.css';
 import '../styles/study.css';
 
 type FocusMode = 'adaptive' | 'weak_points';
+type PreambleStep = 'mode' | 'chat-config';
 
 interface CurrentQuestion {
   question_number: number;
@@ -112,6 +113,7 @@ export function Study() {
   const [chapterId, setChapterId] = useState(stored?.chapterId ?? '01-set-theory');
   const [focusMode, setFocusMode] = useState<FocusMode>('adaptive');
   const [sessionLength, setSessionLength] = useState(10);
+  const [preambleStep, setPreambleStep] = useState<PreambleStep>('mode');
 
   const [session, setSession] = useState<SessionState | null>(null);
   const [sessionComplete, setSessionComplete] = useState<SessionCompleteSummary | null>(null);
@@ -210,6 +212,7 @@ export function Study() {
     setStartError(null);
     setQuestionError(null);
     setSubmitError(null);
+    setPreambleStep('mode');
   }, []);
 
   const beginTutorReveal = useCallback(
@@ -505,14 +508,82 @@ export function Study() {
   }
 
   if (!session) {
+    if (preambleStep === 'mode') {
+      return (
+        <main className="study-page study-preamble-page">
+          <div className="study-wizard study-wizard--mode">
+            <header className="study-wizard__head">
+              <h1 className="study-wizard__title">New Study Session</h1>
+              <p className="study-wizard__sub">How do you want to study?</p>
+            </header>
+
+            {catalogError && <p className="study-start__error">{catalogError}</p>}
+
+            <div className="study-mode-grid">
+              <button
+                type="button"
+                className="study-mode-card"
+                onClick={() => setPreambleStep('chat-config')}
+              >
+                <span className="study-mode-card__icon" aria-hidden="true">
+                  <svg
+                    width="28"
+                    height="28"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                  </svg>
+                </span>
+                <span className="study-mode-card__name">Chat Mode</span>
+                <span className="study-mode-card__desc">Apore asks questions, you type answers</span>
+              </button>
+
+              <div className="study-mode-card study-mode-card--disabled" aria-disabled="true">
+                <span className="study-mode-card__icon" aria-hidden="true">
+                  <svg
+                    width="28"
+                    height="28"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                </span>
+                <span className="study-mode-card__name">Scratchpad Mode</span>
+                <span className="study-mode-card__desc">Apore asks questions, you write answers</span>
+                <span className="study-mode-card__wip">Coming soon</span>
+              </div>
+            </div>
+          </div>
+        </main>
+      );
+    }
+
     return (
       <main className="study-page study-preamble-page">
-        <div className="study-preamble">
-          <h1 className="study-start__heading">Study Session</h1>
-          <p className="study-start__sub">
-            New session in <strong>{activeDomain?.id ?? '…'}</strong> — choose a chapter,
-            focus, and session length.
-          </p>
+        <div className="study-wizard study-wizard--config">
+          <button
+            type="button"
+            className="study-wizard__back"
+            onClick={() => setPreambleStep('mode')}
+          >
+            ← Back
+          </button>
+
+          <header className="study-wizard__head">
+            <h1 className="study-wizard__title">Chat Mode Study Session</h1>
+            <p className="study-wizard__sub">What did you want to study?</p>
+          </header>
 
           {catalogError && <p className="study-start__error">{catalogError}</p>}
 
@@ -520,65 +591,27 @@ export function Study() {
             <h2 id="study-chapter-heading" className="setup-section__heading">
               Chapter
             </h2>
-            <div className="setup-radio" role="radiogroup" aria-label="Chapter">
+            <select
+              className="setup-input study-wizard__select"
+              value={chapterId}
+              onChange={(e) => setChapterId(e.target.value)}
+              aria-label="Chapter"
+            >
               {activeDomain?.chapters.map((c) => {
                 const ready = chapterStudyReady(c);
                 return (
-                  <label key={c.id} className={!ready ? 'study-preamble__disabled' : undefined}>
-                    <input
-                      type="radio"
-                      name="chapter"
-                      value={c.id}
-                      checked={chapterId === c.id}
-                      disabled={!ready}
-                      onChange={() => setChapterId(c.id)}
-                    />
-                    <span>
-                      {c.id}
-                      {c.has_concept_graph ? ' · graph ready' : ' · needs graph'}
-                      {c.has_question_bank
-                        ? ` · ${c.question_bank_count} questions`
-                        : ' · no question bank'}
-                    </span>
-                  </label>
+                  <option key={c.id} value={c.id} disabled={!ready}>
+                    {c.id}
+                    {ready ? ` · ${c.question_bank_count} questions` : ' · not ready'}
+                  </option>
                 );
               })}
-            </div>
-          </section>
-
-          <section className="setup-section" aria-labelledby="study-focus-heading">
-            <h2 id="study-focus-heading" className="setup-section__heading">
-              Focus
-            </h2>
-            <div className="setup-radio" role="radiogroup" aria-label="Focus mode">
-              <label>
-                <input
-                  type="radio"
-                  name="focus"
-                  checked={focusMode === 'adaptive'}
-                  onChange={() => setFocusMode('adaptive')}
-                />
-                <span>
-                  Adaptive — calibration on early questions, then balanced progression
-                </span>
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="focus"
-                  checked={focusMode === 'weak_points'}
-                  onChange={() => setFocusMode('weak_points')}
-                />
-                <span>
-                  Focus weak points — prioritize concepts with low mastery (skips calibration)
-                </span>
-              </label>
-            </div>
+            </select>
           </section>
 
           <section className="setup-section" aria-labelledby="study-length-heading">
             <h2 id="study-length-heading" className="setup-section__heading">
-              Session length
+              How many questions?
             </h2>
             <div className="study-preamble__length">
               {LENGTH_PRESETS.map((n) => (
@@ -608,13 +641,42 @@ export function Study() {
             </div>
           </section>
 
+          <section className="setup-section" aria-labelledby="study-focus-heading">
+            <h2 id="study-focus-heading" className="setup-section__heading">
+              Anything to focus on?
+            </h2>
+            <div className="study-focus-presets" role="group" aria-label="Focus mode">
+              <button
+                type="button"
+                className={`study-preamble__chip${focusMode === 'adaptive' ? ' study-preamble__chip--active' : ''}`}
+                onClick={() => setFocusMode('adaptive')}
+              >
+                Adaptive
+              </button>
+              <button
+                type="button"
+                className={`study-preamble__chip${focusMode === 'weak_points' ? ' study-preamble__chip--active' : ''}`}
+                onClick={() => setFocusMode('weak_points')}
+              >
+                Weak points
+              </button>
+            </div>
+            <textarea
+              className="setup-input study-focus-note"
+              placeholder="Custom focus prompt — coming soon"
+              rows={3}
+              disabled
+              aria-disabled="true"
+            />
+          </section>
+
           <button
             type="button"
             className="btn btn--primary study-start__btn"
             onClick={handleStartSession}
             disabled={startLoading || !canStart}
           >
-            {startLoading ? 'Starting…' : 'Start session'}
+            {startLoading ? 'Starting…' : 'Start'}
           </button>
           {startError && <p className="study-start__error">{startError}</p>}
         </div>

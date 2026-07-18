@@ -3,14 +3,14 @@ import {
   addQuestionBankEntry,
   deleteQuestionBankEntry,
   generateQuestionBank,
-  getKnowledgeCatalog,
   getQuestionBank,
   getQuestionBankGenerateStatus,
   getStoredKnowledgeSource,
   setStoredKnowledgeSource,
   updateQuestionBankEntry,
 } from '../api/client';
-import type { KnowledgeCatalog, QuestionBankEntry, QuestionBankGenerateStatus } from '../api/types';
+import type { QuestionBankEntry, QuestionBankGenerateStatus } from '../api/types';
+import { parseKnowledgeSource, useActiveDomain } from '../shell/ActiveDomainContext';
 import '../styles/questions.css';
 
 const EMPTY_ENTRY: QuestionBankEntry = {
@@ -28,7 +28,7 @@ function isActiveGeneration(status: QuestionBankGenerateStatus): boolean {
 }
 
 export function Questions() {
-  const [catalog, setCatalog] = useState<KnowledgeCatalog | null>(null);
+  const { activeDomain, catalogError } = useActiveDomain();
   const [knowledgeSource, setKnowledgeSource] = useState(getStoredKnowledgeSource());
   const [questions, setQuestions] = useState<QuestionBankEntry[]>([]);
   const [bankPath, setBankPath] = useState('');
@@ -46,11 +46,6 @@ export function Questions() {
       window.clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
-  }, []);
-
-  const refreshCatalog = useCallback(async () => {
-    const data = await getKnowledgeCatalog();
-    setCatalog(data);
   }, []);
 
   const loadBank = useCallback(async (source: string) => {
@@ -129,11 +124,21 @@ export function Questions() {
     [pollGenerationStatus],
   );
 
+  // Keep the selected chapter inside the active domain (workspace). When the
+  // sidebar switches domains, snap to the first chapter of the new domain
+  // unless the current selection already belongs to it.
   useEffect(() => {
-    refreshCatalog().catch((err) =>
-      setError(err instanceof Error ? err.message : 'Failed to load catalog'),
-    );
-  }, [refreshCatalog]);
+    if (!activeDomain?.chapters.length) return;
+    const parsed = parseKnowledgeSource(knowledgeSource);
+    const stillValid =
+      parsed?.domainId === activeDomain.id &&
+      activeDomain.chapters.some((c) => c.id === parsed.chapterId);
+    if (!stillValid) {
+      const next = activeDomain.chapters[0].knowledge_source;
+      setKnowledgeSource(next);
+      setStoredKnowledgeSource(next);
+    }
+  }, [activeDomain, knowledgeSource]);
 
   useEffect(() => {
     loadBank(knowledgeSource);
@@ -141,17 +146,7 @@ export function Questions() {
     return () => stopPolling();
   }, [knowledgeSource, loadBank, resumeGenerationIfRunning, stopPolling]);
 
-  const sourceOptions: { value: string; label: string }[] = [];
-  if (catalog) {
-    for (const d of catalog.domains) {
-      for (const c of d.chapters) {
-        sourceOptions.push({
-          value: c.knowledge_source,
-          label: `${d.id} / ${c.id}`,
-        });
-      }
-    }
-  }
+  const chapterOptions = activeDomain?.chapters ?? [];
 
   const resetForm = () => {
     setEditingId(null);
@@ -234,13 +229,17 @@ export function Questions() {
     <main className="questions-page">
       <h1 className="questions-page__title">Question bank</h1>
       <p className="questions-page__lead">
-        Pre-authored questions are selected during Study by difficulty and type. Depth
-        comes from the concept graph, not from each question row.
+        Questions for <strong>{activeDomain?.id ?? '…'}</strong>. Pre-authored questions are
+        selected during Study by difficulty and type; depth comes from the concept graph,
+        not from each question row.
       </p>
+      {catalogError && (
+        <p className="questions-status questions-status--error">{catalogError}</p>
+      )}
 
       <div className="questions-toolbar">
         <label>
-          Knowledge source
+          Chapter
           <select
             value={knowledgeSource}
             disabled={generating}
@@ -250,9 +249,9 @@ export function Questions() {
               setStoredKnowledgeSource(v);
             }}
           >
-            {sourceOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
+            {chapterOptions.map((c) => (
+              <option key={c.id} value={c.knowledge_source}>
+                {c.id}
               </option>
             ))}
           </select>

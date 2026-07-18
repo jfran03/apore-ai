@@ -27,6 +27,7 @@ export function parseKnowledgeSource(
 interface ActiveDomainValue {
   catalog: KnowledgeCatalog | null;
   catalogError: string | null;
+  catalogLoading: boolean;
   activeDomainId: string | null;
   activeDomain: KnowledgeDomain | null;
   setActiveDomainId: (domainId: string) => void;
@@ -37,6 +38,7 @@ const ActiveDomainContext = createContext<ActiveDomainValue | null>(null);
 export function ActiveDomainProvider({ children }: { children: ReactNode }) {
   const [catalog, setCatalog] = useState<KnowledgeCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [activeDomainId, setActiveDomainIdState] = useState<string | null>(
     () => parseKnowledgeSource(getStoredKnowledgeSource())?.domainId ?? null,
   );
@@ -46,7 +48,8 @@ export function ActiveDomainProvider({ children }: { children: ReactNode }) {
       .then(setCatalog)
       .catch((err) =>
         setCatalogError(err instanceof Error ? err.message : 'Failed to load catalog'),
-      );
+      )
+      .finally(() => setCatalogLoading(false));
   }, []);
 
   // Fall back to the first catalog domain when the stored one no longer exists.
@@ -76,8 +79,8 @@ export function ActiveDomainProvider({ children }: { children: ReactNode }) {
   const activeDomain = catalog?.domains.find((d) => d.id === activeDomainId) ?? null;
 
   const value = useMemo<ActiveDomainValue>(
-    () => ({ catalog, catalogError, activeDomainId, activeDomain, setActiveDomainId }),
-    [catalog, catalogError, activeDomainId, activeDomain, setActiveDomainId],
+    () => ({ catalog, catalogError, catalogLoading, activeDomainId, activeDomain, setActiveDomainId }),
+    [catalog, catalogError, catalogLoading, activeDomainId, activeDomain, setActiveDomainId],
   );
 
   return <ActiveDomainContext.Provider value={value}>{children}</ActiveDomainContext.Provider>;

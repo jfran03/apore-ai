@@ -22,9 +22,21 @@ class ConceptNode:
 class ConceptGraph:
     nodes: dict[str, ConceptNode] = field(default_factory=dict)
     edges: list[dict] = field(default_factory=list)
+    teaching_order: list[str] = field(default_factory=list)
 
     def get(self, concept_id: str) -> ConceptNode | None:
         return self.nodes.get(concept_id)
+
+    def ordered_ids(self) -> list[str]:
+        """Concept ids in manual teaching order, falling back to depth-then-id.
+
+        Independent of prerequisite edges and Study selection; used only for
+        setup-facing ordering (wiki list, question bank grouping/generation).
+        """
+        ids = list(self.nodes.keys())
+        if self.teaching_order and set(self.teaching_order) == set(ids):
+            return [cid for cid in self.teaching_order if cid in self.nodes]
+        return sorted(ids, key=lambda cid: (self.nodes[cid].depth, cid))
 
     def label_for(self, concept_id: str) -> str:
         node = self.nodes.get(concept_id)
@@ -135,7 +147,11 @@ def load_concept_graph(chapter: ChapterContext) -> ConceptGraph:
         return ConceptGraph()
 
     raw = json.loads(path.read_text(encoding="utf-8"))
-    graph = ConceptGraph(edges=list(raw.get("edges") or []))
+    stored_order = raw.get("teaching_order")
+    teaching_order = (
+        [str(cid) for cid in stored_order] if isinstance(stored_order, list) else []
+    )
+    graph = ConceptGraph(edges=list(raw.get("edges") or []), teaching_order=teaching_order)
     for item in raw.get("nodes") or []:
         node_id = item.get("id")
         if not node_id:

@@ -1,14 +1,13 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   createSession,
   fetchQuestion,
   postTurn,
   getSessionState,
-  getStoredKnowledgeSource,
   setStoredKnowledgeSource,
 } from '../api/client';
 import type { QuestionResponse, TurnResponse } from '../api/types';
-import { parseKnowledgeSource, useActiveDomain } from '../shell/ActiveDomainContext';
+import { useActiveDomain } from '../shell/ActiveDomainContext';
 import { QuestionCard } from '../components/QuestionCard';
 import { QuestionHistoryCard, type HistoryRecord } from '../components/QuestionHistoryCard';
 import {
@@ -107,10 +106,9 @@ function gradeFromTurn(res: TurnResponse): GradeResult {
 }
 
 export function Study() {
-  const { activeDomain, catalogError } = useActiveDomain();
+  const { activeDomain, activeChapter, activeChapterId, setActiveChapterId, catalogError } =
+    useActiveDomain();
 
-  const stored = parseKnowledgeSource(getStoredKnowledgeSource());
-  const [chapterId, setChapterId] = useState(stored?.chapterId ?? '01-set-theory');
   const [focusMode, setFocusMode] = useState<FocusMode>('adaptive');
   const [sessionLength, setSessionLength] = useState(10);
   const [preambleStep, setPreambleStep] = useState<PreambleStep>('mode');
@@ -125,14 +123,7 @@ export function Study() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const pendingAfterReveal = useRef<(() => void) | null>(null);
 
-  useEffect(() => {
-    if (!activeDomain?.chapters.length) return;
-    if (!activeDomain.chapters.some((c) => c.id === chapterId)) {
-      setChapterId(activeDomain.chapters[0].id);
-    }
-  }, [activeDomain, chapterId]);
-
-  const selectedChapter = activeDomain?.chapters.find((c) => c.id === chapterId);
+  const selectedChapter = activeChapter;
   const canStart =
     selectedChapter != null && chapterStudyReady(selectedChapter) && sessionLength >= 1 && sessionLength <= 50;
 
@@ -593,8 +584,8 @@ export function Study() {
             </h2>
             <select
               className="setup-input study-wizard__select"
-              value={chapterId}
-              onChange={(e) => setChapterId(e.target.value)}
+              value={activeChapterId ?? ''}
+              onChange={(e) => setActiveChapterId(e.target.value)}
               aria-label="Chapter"
             >
               {activeDomain?.chapters.map((c) => {

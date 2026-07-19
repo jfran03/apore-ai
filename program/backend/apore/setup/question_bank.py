@@ -274,7 +274,7 @@ def generate_question_bank(
         knowledge_source=knowledge_source,
         state_path=state_path,
     )
-    concept_ids = sorted(graph.nodes.keys())
+    concept_ids = graph.ordered_ids()
     batches = _generate_concepts_parallel(
         concept_ids,
         chapter=chapter,

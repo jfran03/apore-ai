@@ -1,11 +1,10 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { MotionConfig } from 'framer-motion';
 import { AppShell } from './shell/AppShell';
 import { ActiveDomainProvider } from './shell/ActiveDomainContext';
 import { Home } from './pages/Home';
 import { Study } from './pages/Study';
 import { Setup } from './pages/Setup';
-import { Questions } from './pages/Questions';
 import { SessionTranscriptPage } from './pages/SessionTranscript';
 import './styles/global.css';
 import './styles/components.css';
@@ -19,7 +18,7 @@ export function App() {
             <Route element={<AppShell />}>
               <Route path="/" element={<Home />} />
               <Route path="/setup" element={<Setup />} />
-              <Route path="/questions" element={<Questions />} />
+              <Route path="/questions" element={<Navigate to="/setup" replace />} />
               <Route path="/study" element={<Study />} />
               <Route path="/sessions/:id" element={<SessionTranscriptPage />} />
               <Route

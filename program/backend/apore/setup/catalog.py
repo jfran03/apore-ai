@@ -7,6 +7,9 @@ from pathlib import Path
 
 from apore.fixtures.loader import load_manifest
 from apore.knowledge.chapter import find_chapter_with_graph
+from apore.setup import artifacts as artifacts_module
+from apore.setup import compile_jobs
+from apore.setup import sources as sources_module
 
 
 def _question_bank_status(chapter_root: Path) -> dict:
@@ -22,19 +25,30 @@ def _question_bank_status(chapter_root: Path) -> dict:
 
 
 def _chapter_status(chapter_root: Path) -> dict:
-    sources = chapter_root / "sources"
     graph = chapter_root / "concept-graph.json"
     wiki = chapter_root / "wiki"
-    source_files = []
-    if sources.is_dir():
-        source_files = [p.name for p in sources.iterdir() if p.is_file()]
-    wiki_count = len(list(wiki.glob("*.md"))) if wiki.is_dir() else 0
+    listed_sources = sources_module.list_sources(chapter_root)
+    source_files = [s["display_name"] for s in listed_sources if s.get("display_name")]
+    wiki_count = (
+        len([p for p in wiki.glob("*.md") if p.name != "_index.md"])
+        if wiki.is_dir()
+        else 0
+    )
+    artifact = artifacts_module.chapter_artifact_status(
+        chapter_root,
+        current_source_hash=sources_module.source_hash(chapter_root),
+        live_run_tokens=compile_jobs.live_run_tokens(),
+    )
     return {
-        "sources_present": sources.is_dir() and bool(source_files),
-        "source_count": len(source_files),
+        "sources_present": bool(listed_sources),
+        "source_count": len(listed_sources),
         "source_files": source_files,
         "has_concept_graph": graph.is_file(),
         "wiki_count": wiki_count,
+        "compile_stage": artifact["compile"]["stage"],
+        "is_approved": artifact["is_approved"],
+        "is_stale": artifact["is_stale"],
+        "has_unapproved_compile": artifact["has_unapproved_compile"],
         **_question_bank_status(chapter_root),
     }
 

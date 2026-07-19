@@ -19,7 +19,27 @@ import type {
   QuestionBankGenerateStatus,
   SessionListResponse,
   SessionTranscript,
+  SourceEntry,
+  SourceListResult,
+  ChapterArtifactStatus,
+  CompileStatus,
+  WikiPreview,
 } from './types';
+
+function domainChapterBase(knowledgeSource: string): string {
+  if (knowledgeSource.startsWith('fixture:')) {
+    if (knowledgeSource === 'fixture:apore-lite') {
+      return '/setup/domains/discrete-math/chapters/01-set-theory';
+    }
+    throw new Error(`Unsupported fixture knowledge source: ${knowledgeSource}`);
+  }
+  if (knowledgeSource.startsWith('domain:')) {
+    const rest = knowledgeSource.split(':', 2)[1];
+    const [domainId, chapterId] = rest.split('/', 2);
+    return `/setup/domains/${encodeURIComponent(domainId)}/chapters/${encodeURIComponent(chapterId)}`;
+  }
+  throw new Error(`Unsupported knowledge source: ${knowledgeSource}`);
+}
 
 const KNOWLEDGE_SOURCE_KEY = 'apore.knowledge_source';
 
@@ -243,4 +263,84 @@ export async function listSessions(): Promise<SessionListResponse> {
 
 export async function getSessionTranscript(sessionId: string): Promise<SessionTranscript> {
   return apiFetch<SessionTranscript>(`/sessions/${encodeURIComponent(sessionId)}/transcript`);
+}
+
+export async function getChapterSources(
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<SourceListResult> {
+  return apiFetch<SourceListResult>(`${domainChapterBase(knowledgeSource)}/sources`);
+}
+
+export async function addUrlSource(
+  url: string,
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<SourceEntry> {
+  return apiFetch<SourceEntry>(`${domainChapterBase(knowledgeSource)}/sources/url`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+}
+
+export async function deleteSource(
+  sourceId: string,
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<SourceListResult> {
+  return apiFetch<SourceListResult>(
+    `${domainChapterBase(knowledgeSource)}/sources/${encodeURIComponent(sourceId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function getChapterArtifact(
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<ChapterArtifactStatus> {
+  return apiFetch<ChapterArtifactStatus>(`${domainChapterBase(knowledgeSource)}/artifact`);
+}
+
+export async function startCompile(
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<CompileStatus> {
+  return apiFetch<CompileStatus>(`${domainChapterBase(knowledgeSource)}/compile`, {
+    method: 'POST',
+  });
+}
+
+export async function getCompileStatus(
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<CompileStatus> {
+  return apiFetch<CompileStatus>(`${domainChapterBase(knowledgeSource)}/compile/status`);
+}
+
+export async function approveCompile(
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<ChapterArtifactStatus> {
+  return apiFetch<ChapterArtifactStatus>(
+    `${domainChapterBase(knowledgeSource)}/compile/approve`,
+    { method: 'POST' },
+  );
+}
+
+export async function getWikiPreview(
+  source: 'staging' | 'published',
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<WikiPreview> {
+  return apiFetch<WikiPreview>(
+    `${domainChapterBase(knowledgeSource)}/wiki?source=${source}`,
+  );
+}
+
+export async function setConceptOrder(
+  order: string[],
+  source: 'staging' | 'published',
+  knowledgeSource: string = getStoredKnowledgeSource(),
+): Promise<WikiPreview> {
+  return apiFetch<WikiPreview>(
+    `${domainChapterBase(knowledgeSource)}/concept-order?source=${source}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    },
+  );
 }

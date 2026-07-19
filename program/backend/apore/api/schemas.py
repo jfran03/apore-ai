@@ -236,3 +236,85 @@ class SessionTranscriptResponse(BaseModel):
     focus_mode: str
     max_questions: int
     body: str
+
+
+# --- Source ingestion --------------------------------------------------------
+
+
+class SourceEntryView(BaseModel):
+    id: str
+    kind: str
+    display_name: str | None = None
+    media_type: str | None = None
+    size: int | None = None
+    ingested_at: str | None = None
+    normalize_status: str
+    normalize_error: str | None = None
+
+
+class SourceListResponse(BaseModel):
+    sources: list[SourceEntryView]
+
+
+class AddUrlSourceRequest(BaseModel):
+    url: str
+
+
+# --- Compile pipeline --------------------------------------------------------
+
+
+class CompileProgress(BaseModel):
+    done: int = 0
+    total: int = 0
+
+
+class CompileStatus(BaseModel):
+    stage: Literal[
+        "idle", "normalizing", "compiling", "validating", "ready", "failed", "interrupted"
+    ]
+    version: int = 0
+    source_hash: str | None = None
+    progress: CompileProgress = Field(default_factory=CompileProgress)
+    error_code: str | None = None
+    error_message: str | None = None
+    started_at: str | None = None
+    updated_at: str | None = None
+
+
+class ApprovalView(BaseModel):
+    version: int
+    source_hash: str | None = None
+    approved_at: str | None = None
+    legacy: bool = False
+
+
+class ChapterArtifactStatus(BaseModel):
+    source_hash: str | None = None
+    compile: CompileStatus
+    approved: ApprovalView | None = None
+    is_approved: bool = False
+    is_stale: bool = False
+    has_unapproved_compile: bool = False
+    wiki_count: int = 0
+    concept_count: int = 0
+
+
+class WikiPageView(BaseModel):
+    concept_id: str
+    label: str
+    depth: int
+    order: int = 0
+    body: str
+
+
+class WikiPreviewResponse(BaseModel):
+    source: Literal["staging", "published"]
+    version: int = 0
+    pages: list[WikiPageView]
+    edges: list[dict]
+
+
+class ConceptOrderRequest(BaseModel):
+    order: list[str] = Field(
+        description="Concept ids in teaching order; must be an exact permutation.",
+    )

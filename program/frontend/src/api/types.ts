@@ -120,6 +120,15 @@ export interface KnowledgeFixture {
   chapter_ready: boolean;
 }
 
+export type CompileStage =
+  | 'idle'
+  | 'normalizing'
+  | 'compiling'
+  | 'validating'
+  | 'ready'
+  | 'failed'
+  | 'interrupted';
+
 export interface KnowledgeChapter {
   id: string;
   knowledge_source: string;
@@ -130,6 +139,74 @@ export interface KnowledgeChapter {
   wiki_count: number;
   has_question_bank: boolean;
   question_bank_count: number;
+  compile_stage: CompileStage;
+  is_approved: boolean;
+  is_stale: boolean;
+  has_unapproved_compile: boolean;
+}
+
+export interface SourceEntry {
+  id: string;
+  kind: 'file' | 'url';
+  display_name: string | null;
+  media_type: string | null;
+  size: number | null;
+  ingested_at: string | null;
+  normalize_status: 'ok' | 'failed' | 'pending' | 'legacy';
+  normalize_error: string | null;
+}
+
+export interface SourceListResult {
+  sources: SourceEntry[];
+}
+
+export interface CompileProgress {
+  done: number;
+  total: number;
+}
+
+export interface CompileStatus {
+  stage: CompileStage;
+  version: number;
+  source_hash: string | null;
+  progress: CompileProgress;
+  error_code: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ChapterApproval {
+  version: number;
+  source_hash: string | null;
+  approved_at: string | null;
+  legacy: boolean;
+}
+
+export interface ChapterArtifactStatus {
+  source_hash: string | null;
+  compile: CompileStatus;
+  approved: ChapterApproval | null;
+  is_approved: boolean;
+  is_stale: boolean;
+  has_unapproved_compile: boolean;
+  wiki_count: number;
+  concept_count: number;
+}
+
+export interface WikiPageView {
+  concept_id: string;
+  label: string;
+  depth: number;
+  order: number;
+  body: string;
+}
+
+export interface WikiPreview {
+  source: 'staging' | 'published';
+  version: number;
+  pages: WikiPageView[];
+  edges: Array<Record<string, unknown>>;
 }
 
 export interface KnowledgeDomain {

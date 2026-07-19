@@ -11,8 +11,12 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from apore.api.schemas import (
+    AddUrlSourceRequest,
     BatchRunRequest,
     BatchRunResponse,
+    ChapterArtifactStatus,
+    CompileStatus,
+    ConceptOrderRequest,
     CreateChapterRequest,
     CreateDomainRequest,
     CreateSessionRequest,
@@ -31,10 +35,13 @@ from apore.api.schemas import (
     SessionStateResponse,
     SessionSummary,
     SessionTranscriptResponse,
+    SourceEntryView,
+    SourceListResponse,
     StubCompileResponse,
     TurnRequest,
     TurnResponse,
     UploadSourcesResponse,
+    WikiPreviewResponse,
 )
 from apore.config.llm import (
     get_active_model,
@@ -76,6 +83,15 @@ from apore.setup.question_bank import (
     write_bank,
 )
 from apore.setup.question_bank_jobs import get_job_status, start_job
+from apore.setup import artifacts as artifacts_module
+from apore.setup import sources as sources_module
+from apore.setup.compile_jobs import (
+    approve_compile,
+    get_compile_status,
+    live_run_tokens,
+    load_wiki_preview,
+    start_compile,
+)
 from apore.setup.stub_compile import stub_compile_chapter
 from apore.runtime.question_bank import QuestionBank
 from apore.sim.runner import run_sessions as sim_run_sessions
@@ -349,6 +365,21 @@ def _start_question_bank_generation(
     chapter_root: Path, knowledge_source: str
 ) -> QuestionBankGenerateStatus:
     provider, model = _require_provider()
+    status = artifacts_module.chapter_artifact_status(
+        chapter_root,
+        current_source_hash=sources_module.source_hash(chapter_root),
+        live_run_tokens=live_run_tokens(),
+    )
+    if not status["is_approved"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Approve the compiled wiki before generating questions.",
+        )
+    if status["is_stale"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Sources changed since approval. Recompile and approve before generating.",
+        )
     graph = _graph_for_chapter_root(chapter_root)
     if not graph.nodes:
         raise HTTPException(status_code=400, detail="concept-graph.json has no nodes")
@@ -828,31 +859,180 @@ def post_setup_chapter(domain_id: str, body: CreateChapterRequest) -> dict:
     }
 
 
+def _chapter_root_or_404(domain_id: str, chapter_id: str) -> Path:
+    try:
+        root = chapter_dir(PROGRAM_ROOT, domain_id, chapter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    return root
+
+
+@app.get(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/sources",
+    response_model=SourceListResponse,
+)
+def get_chapter_sources(domain_id: str, chapter_id: str) -> SourceListResponse:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    return SourceListResponse(
+        sources=[SourceEntryView(**s) for s in sources_module.list_sources(root)]
+    )
+
+
 @app.post("/setup/domains/{domain_id}/chapters/{chapter_id}/sources", response_model=UploadSourcesResponse)
 async def post_upload_sources(
     domain_id: str,
     chapter_id: str,
     files: list[UploadFile] = File(...),
 ) -> UploadSourcesResponse:
-    try:
-        dest_dir = chapter_dir(PROGRAM_ROOT, domain_id, chapter_id) / "sources"
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    if not dest_dir.parent.is_dir():
-        raise HTTPException(status_code=404, detail="Chapter not found")
-
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    root = _chapter_root_or_404(domain_id, chapter_id)
     uploaded: list[str] = []
     for upload in files:
         name = Path(upload.filename or "upload").name
-        if ".." in name or name.startswith("/"):
-            raise HTTPException(status_code=400, detail=f"Invalid filename: {name}")
-        target = dest_dir / name
         content = await upload.read()
-        target.write_bytes(content)
+        try:
+            sources_module.add_file_source(
+                root, name, content, media_type=upload.content_type
+            )
+        except sources_module.SourceError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         uploaded.append(name)
     return UploadSourcesResponse(uploaded=uploaded)
+
+
+@app.post(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/sources/url",
+    response_model=SourceEntryView,
+)
+def post_url_source(
+    domain_id: str, chapter_id: str, body: AddUrlSourceRequest
+) -> SourceEntryView:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    try:
+        entry = sources_module.add_url_source(root, body.url)
+    except sources_module.SourceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SourceEntryView(**entry)
+
+
+@app.delete(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/sources/{source_id}",
+    response_model=SourceListResponse,
+)
+def delete_chapter_source(
+    domain_id: str, chapter_id: str, source_id: str
+) -> SourceListResponse:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    try:
+        sources_module.delete_source(root, source_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SourceListResponse(
+        sources=[SourceEntryView(**s) for s in sources_module.list_sources(root)]
+    )
+
+
+@app.get(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/artifact",
+    response_model=ChapterArtifactStatus,
+)
+def get_chapter_artifact(domain_id: str, chapter_id: str) -> ChapterArtifactStatus:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    status = artifacts_module.chapter_artifact_status(
+        root,
+        current_source_hash=sources_module.source_hash(root),
+        live_run_tokens=live_run_tokens(),
+    )
+    return ChapterArtifactStatus(**status)
+
+
+@app.post(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/compile",
+    response_model=CompileStatus,
+    status_code=202,
+)
+def post_compile_chapter(domain_id: str, chapter_id: str) -> CompileStatus:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    provider, model = _require_provider()
+    try:
+        status = start_compile(
+            root, provider=provider, model=model, program_root=PROGRAM_ROOT
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CompileStatus(**status)
+
+
+@app.get(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/compile/status",
+    response_model=CompileStatus,
+)
+def get_compile_chapter_status(domain_id: str, chapter_id: str) -> CompileStatus:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    return CompileStatus(**get_compile_status(root))
+
+
+@app.post(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/compile/approve",
+    response_model=ChapterArtifactStatus,
+)
+def post_approve_compile(domain_id: str, chapter_id: str) -> ChapterArtifactStatus:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    try:
+        status = approve_compile(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ChapterArtifactStatus(**status)
+
+
+@app.get(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/wiki",
+    response_model=WikiPreviewResponse,
+)
+def get_chapter_wiki(
+    domain_id: str, chapter_id: str, source: str = "staging"
+) -> WikiPreviewResponse:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    try:
+        preview = load_wiki_preview(root, source)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return WikiPreviewResponse(**preview)
+
+
+@app.put(
+    "/setup/domains/{domain_id}/chapters/{chapter_id}/concept-order",
+    response_model=WikiPreviewResponse,
+)
+def put_chapter_concept_order(
+    domain_id: str,
+    chapter_id: str,
+    body: ConceptOrderRequest,
+    source: str = "published",
+) -> WikiPreviewResponse:
+    root = _chapter_root_or_404(domain_id, chapter_id)
+    if source == "staging":
+        directory = artifacts_module.staging_dir(root)
+    elif source == "published":
+        directory = root
+    else:
+        raise HTTPException(status_code=400, detail="source must be 'staging' or 'published'")
+    try:
+        artifacts_module.write_teaching_order(directory, body.order)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except artifacts_module.ArtifactValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        preview = load_wiki_preview(root, source)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return WikiPreviewResponse(**preview)
 
 
 @app.post(

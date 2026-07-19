@@ -1,8 +1,53 @@
 """Deterministic stub provider for testing."""
 
 import json
+import re
 
 from apore.providers.base import Provider
+
+_SOURCE_ID_RE = re.compile(r"^### Source:\s*(\S+)\s*$", re.MULTILINE)
+_BANK_CONCEPT_RE = re.compile(r"concept ['\"]([a-z0-9_]+)['\"]")
+
+
+def _bank_response(messages: list[dict]) -> str:
+    """Emit six valid questions for the concept named in the closing message."""
+    combined = " ".join(str(m.get("content", "")) for m in messages)
+    match = _BANK_CONCEPT_RE.search(combined)
+    concept_id = match.group(1) if match else "set_theory_intro"
+    bands = {"recall": (0.25, 0.3), "apply": (0.5, 0.55), "synthesis": (0.75, 0.8)}
+    questions = []
+    for qtype, (d1, d2) in bands.items():
+        for idx, diff in enumerate((d1, d2), start=1):
+            questions.append(
+                {
+                    "id": f"{concept_id}-{qtype}-{idx:02d}",
+                    "concept_id": concept_id,
+                    "type": qtype,
+                    "intended_difficulty": diff,
+                    "text": f"[{qtype}] Question about {concept_id.replace('_', ' ')} ({idx}).",
+                }
+            )
+    return json.dumps({"questions": questions})
+
+
+def _compile_response(messages: list[dict]) -> str:
+    """Build a valid compile-chapter artifact citing the provided source ids."""
+    combined = " ".join(str(m.get("content", "")) for m in messages)
+    source_ids = _SOURCE_ID_RE.findall(combined)
+    citations = source_ids or ["unknown_source"]
+    return json.dumps(
+        {
+            "pages": [
+                {
+                    "concept_id": "chapter_overview",
+                    "label": "Chapter Overview",
+                    "body": "A compiled overview synthesized from the chapter sources.",
+                    "citations": citations,
+                }
+            ],
+            "edges": [],
+        }
+    )
 
 _QUESTION_BLOCK = """\
 QUESTION
@@ -43,56 +88,6 @@ _SIGNALS = {
     "turn_count": 2,
     "hedging_count": 0,
 }
-
-_BANK_JSON = json.dumps(
-    {
-        "questions": [
-            {
-                "id": "set_theory_intro-recall-01",
-                "concept_id": "set_theory_intro",
-                "type": "recall",
-                "intended_difficulty": 0.25,
-                "text": "What is the difference between a set and a multiset?",
-            },
-            {
-                "id": "set_theory_intro-recall-02",
-                "concept_id": "set_theory_intro",
-                "type": "recall",
-                "intended_difficulty": 0.3,
-                "text": "Why is the empty set a valid set?",
-            },
-            {
-                "id": "set_theory_intro-apply-01",
-                "concept_id": "set_theory_intro",
-                "type": "apply",
-                "intended_difficulty": 0.5,
-                "text": "How many elements does the empty set contain?",
-            },
-            {
-                "id": "set_theory_intro-apply-02",
-                "concept_id": "set_theory_intro",
-                "type": "apply",
-                "intended_difficulty": 0.55,
-                "text": "If you list {a, b, a}, how many distinct elements are in the set?",
-            },
-            {
-                "id": "set_theory_intro-synthesis-01",
-                "concept_id": "set_theory_intro",
-                "type": "synthesis",
-                "intended_difficulty": 0.75,
-                "text": "When might a multiset be more appropriate than a set?",
-            },
-            {
-                "id": "set_theory_intro-synthesis-02",
-                "concept_id": "set_theory_intro",
-                "type": "synthesis",
-                "intended_difficulty": 0.8,
-                "text": "Connect distinct elements to why duplicates collapse in a set.",
-            },
-        ]
-    }
-)
-
 
 def _dialogue_user_count(messages: list[dict]) -> int:
     user_msgs = [m for m in messages if m.get("role") == "user"]
@@ -144,8 +139,10 @@ class StubProvider(Provider):
             return json.dumps(
                 {**_SIGNALS, "hint_count": hint_count, "turn_count": turn_count}
             )
+        if protocol == "compile-chapter":
+            return _compile_response(messages)
         if protocol == "generate-question-bank":
-            return _BANK_JSON
+            return _bank_response(messages)
         if protocol == "generate-session-title":
             return "Introduction to Sets — Adaptive Practice"
         if protocol == "generate-question":

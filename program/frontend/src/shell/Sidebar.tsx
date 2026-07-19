@@ -1,10 +1,87 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { listSessions } from '../api/client';
+import { Link, useNavigate } from 'react-router-dom';
+import { createDomain, listSessions } from '../api/client';
 import type { SessionSummary } from '../api/types';
 import { parseKnowledgeSource, useActiveDomain } from './ActiveDomainContext';
 
 const VISIBLE_SESSIONS = 5;
+
+function NewDomainAction() {
+  const { setActiveDomainId, refreshCatalog } = useActiveDomain();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [domainId, setDomainId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCreate = async () => {
+    const id = domainId.trim();
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createDomain(id);
+      await refreshCatalog();
+      setActiveDomainId(id);
+      setDomainId('');
+      setOpen(false);
+      navigate('/setup');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create domain');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="sidebar__new-session"
+        onClick={() => setOpen(true)}
+      >
+        <span aria-hidden="true">⊕</span> New Domain
+      </button>
+    );
+  }
+
+  return (
+    <form
+      className="sidebar__new-domain"
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleCreate();
+      }}
+    >
+      <input
+        className="sidebar__new-domain-input"
+        value={domainId}
+        autoFocus
+        placeholder="domain-id"
+        disabled={busy}
+        onChange={(e) => setDomainId(e.target.value)}
+        aria-label="New domain id"
+      />
+      <div className="sidebar__new-domain-actions">
+        <button type="submit" className="btn btn--primary" disabled={busy || !domainId.trim()}>
+          Create
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          disabled={busy}
+          onClick={() => {
+            setOpen(false);
+            setError(null);
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+      {error && <p className="sidebar__new-domain-error">{error}</p>}
+    </form>
+  );
+}
 
 export function formatRelativeAge(iso: string): string {
   const then = Date.parse(iso);
@@ -108,9 +185,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar" aria-label="Learning domains">
       <div className="sidebar__top">
-        <Link to="/setup" className="sidebar__new-session">
-          <span aria-hidden="true">⊕</span> New Domain
-        </Link>
+        <NewDomainAction />
       </div>
       <div className="sidebar__section">
         <p className="sidebar__section-title">Domains</p>

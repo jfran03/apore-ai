@@ -73,5 +73,13 @@
       "provenance": "fixture_bootstrap",
       "confidence": "INFERRED"
     }
+  ],
+  "teaching_order": [
+    "set_operations",
+    "set_partitions",
+    "special_sets",
+    "venn_diagrams",
+    "ways_to_describe_sets",
+    "what_is_a_set"
   ]
 }

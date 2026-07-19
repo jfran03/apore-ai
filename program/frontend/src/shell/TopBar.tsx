@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar';
 
 const MENU_ITEMS = [
   { to: '/study', label: 'Study' },
-  { to: '/questions', label: 'Questions' },
+  { to: '/setup', label: 'Setup' },
   { to: '/runs', label: 'Runs' },
   { to: '/graph', label: 'Graph' },
 ] as const;

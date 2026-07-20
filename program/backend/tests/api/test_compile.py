@@ -173,13 +173,25 @@ def test_concept_order_reorders_published_wiki():
     body = put.json()
     assert [p["concept_id"] for p in body["pages"]] == reordered
     assert [p["order"] for p in body["pages"]] == [0, 1, 2]
-    assert body["edges"] == published["edges"]
-    depth_before = {p["concept_id"]: p["depth"] for p in published["pages"]}
-    depth_after = {p["concept_id"]: p["depth"] for p in body["pages"]}
-    assert depth_before == depth_after
+    # Reorder rewrites the hierarchy: depth follows list position...
+    assert {p["concept_id"]: p["depth"] for p in body["pages"]} == {
+        "gamma": 0,
+        "alpha": 1,
+        "beta": 2,
+    }
+    # ...and edges become a single linear chain along the new order.
+    assert [(e["source"], e["target"]) for e in body["edges"]] == [
+        ("gamma", "alpha"),
+        ("alpha", "beta"),
+    ]
 
     persisted = client.get(f"{base}/wiki", params={"source": "published"}).json()
     assert [p["concept_id"] for p in persisted["pages"]] == reordered
+    assert {p["concept_id"]: p["depth"] for p in persisted["pages"]} == {
+        "gamma": 0,
+        "alpha": 1,
+        "beta": 2,
+    }
 
 
 def test_concept_order_rejects_non_permutation():

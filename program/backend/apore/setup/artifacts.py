@@ -209,10 +209,12 @@ def resolve_teaching_order(graph: dict) -> list[str]:
 
 
 def write_teaching_order(directory: Path, order: list[str]) -> None:
-    """Persist a validated teaching order into ``concept-graph.json``.
+    """Persist a validated teaching hierarchy into ``concept-graph.json``.
 
-    ``order`` must be an exact permutation of the graph's node ids. Only the
-    ``teaching_order`` field is written; nodes and edges are untouched.
+    ``order`` must be an exact permutation of the graph's node ids. The human's
+    ordering becomes the learning hierarchy: ``teaching_order`` is stored, the
+    prerequisite ``edges`` are replaced by a linear chain along the order, and
+    each node's ``depth`` is set to its position in the order (0-based).
     """
     graph_path = directory / GRAPH_NAME
     graph = _read_json(graph_path)
@@ -226,6 +228,22 @@ def write_teaching_order(directory: Path, order: list[str]) -> None:
             ["teaching order must be an exact permutation of the graph concept ids"]
         )
 
+    depth_by_id = {concept_id: index for index, concept_id in enumerate(requested)}
+    for node in graph.get("nodes") or []:
+        concept_id = node.get("id")
+        if concept_id in depth_by_id:
+            node["depth"] = depth_by_id[concept_id]
+
+    graph["edges"] = [
+        {
+            "source": requested[i],
+            "target": requested[i + 1],
+            "relation": "prerequisite_of",
+            "provenance": "human_reorder",
+            "confidence": "DECLARED",
+        }
+        for i in range(len(requested) - 1)
+    ]
     graph["teaching_order"] = requested
     tmp = graph_path.with_suffix(graph_path.suffix + ".tmp")
     tmp.write_text(json.dumps(graph, indent=2) + "\n", encoding="utf-8")

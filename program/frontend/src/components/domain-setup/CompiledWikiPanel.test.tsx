@@ -114,7 +114,7 @@ describe('CompiledWikiPanel', () => {
 
     expect(await screen.findByRole('button', { name: 'Reorder Alpha' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reorder Beta' })).toBeInTheDocument();
-    expect(screen.getByText(/drag to set teaching order/)).toBeInTheDocument();
+    expect(screen.getByText(/drag to set learning hierarchy/)).toBeInTheDocument();
   });
 
   it('keeps a concept collapsed until its toggle is clicked', async () => {

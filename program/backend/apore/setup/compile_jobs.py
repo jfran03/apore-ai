@@ -36,6 +36,7 @@ from apore.setup.artifacts import (
 )
 from apore.setup.compile import CompileError, compile_to_staging
 from apore.setup import sources as sources_module
+from apore.knowledge.chapter import resolve_wiki_page
 
 import json
 
@@ -266,8 +267,8 @@ def load_wiki_preview(chapter_root: Path, source: str) -> dict:
         concept_id = node.get("id")
         if not concept_id:
             continue
-        page_path = wiki_dir / f"{concept_id}.md"
-        body = page_path.read_text(encoding="utf-8") if page_path.is_file() else ""
+        page_path = resolve_wiki_page(wiki_dir, concept_id, node.get("source_file"))
+        body = page_path.read_text(encoding="utf-8") if page_path else ""
         pages.append(
             {
                 "concept_id": concept_id,

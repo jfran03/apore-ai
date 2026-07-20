@@ -286,7 +286,7 @@ export function CompiledWikiPanel({
           <p className="wb-wiki__meta">
             {preview.source === 'staging' ? 'Draft' : 'Published'} · {pages.length} concept
             {pages.length === 1 ? '' : 's'} · {preview.edges.length} prerequisite edge
-            {preview.edges.length === 1 ? '' : 's'} · drag to set teaching order
+            {preview.edges.length === 1 ? '' : 's'} · drag to set learning hierarchy
           </p>
           <DndContext
             sensors={sensors}

@@ -4,7 +4,7 @@
       "id": "set_operations",
       "label": "Set Operations",
       "source_file": "set-operations.md",
-      "depth": 0
+      "depth": 2
     },
     {
       "id": "set_partitions",
@@ -16,70 +16,70 @@
       "id": "special_sets",
       "label": "Special Sets",
       "source_file": "special-sets.md",
-      "depth": 2
+      "depth": 3
     },
     {
       "id": "venn_diagrams",
       "label": "Venn Diagrams",
       "source_file": "venn-diagrams.md",
-      "depth": 3
+      "depth": 4
     },
     {
       "id": "ways_to_describe_sets",
       "label": "Ways To Describe Sets",
       "source_file": "ways-to-describe-sets.md",
-      "depth": 4
+      "depth": 5
     },
     {
       "id": "what_is_a_set",
       "label": "What Is A Set",
       "source_file": "what-is-a-set.md",
-      "depth": 5
+      "depth": 0
     }
   ],
   "edges": [
     {
-      "source": "set_operations",
+      "source": "what_is_a_set",
       "target": "set_partitions",
       "relation": "prerequisite_of",
-      "provenance": "fixture_bootstrap",
-      "confidence": "INFERRED"
+      "provenance": "human_reorder",
+      "confidence": "DECLARED"
     },
     {
       "source": "set_partitions",
+      "target": "set_operations",
+      "relation": "prerequisite_of",
+      "provenance": "human_reorder",
+      "confidence": "DECLARED"
+    },
+    {
+      "source": "set_operations",
       "target": "special_sets",
       "relation": "prerequisite_of",
-      "provenance": "fixture_bootstrap",
-      "confidence": "INFERRED"
+      "provenance": "human_reorder",
+      "confidence": "DECLARED"
     },
     {
       "source": "special_sets",
       "target": "venn_diagrams",
       "relation": "prerequisite_of",
-      "provenance": "fixture_bootstrap",
-      "confidence": "INFERRED"
+      "provenance": "human_reorder",
+      "confidence": "DECLARED"
     },
     {
       "source": "venn_diagrams",
       "target": "ways_to_describe_sets",
       "relation": "prerequisite_of",
-      "provenance": "fixture_bootstrap",
-      "confidence": "INFERRED"
-    },
-    {
-      "source": "ways_to_describe_sets",
-      "target": "what_is_a_set",
-      "relation": "prerequisite_of",
-      "provenance": "fixture_bootstrap",
-      "confidence": "INFERRED"
+      "provenance": "human_reorder",
+      "confidence": "DECLARED"
     }
   ],
   "teaching_order": [
-    "set_operations",
+    "what_is_a_set",
     "set_partitions",
+    "set_operations",
     "special_sets",
     "venn_diagrams",
-    "ways_to_describe_sets",
-    "what_is_a_set"
+    "ways_to_describe_sets"
   ]
 }

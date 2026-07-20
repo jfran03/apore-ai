@@ -114,3 +114,33 @@ def test_wiki_preview_published_after_approve(chapter: Path):
     assert "chapter_overview" in preview["pages"][0]["body"] or preview["pages"][0][
         "body"
     ].startswith("#")
+
+
+def test_wiki_preview_resolves_kebab_filenames(tmp_path: Path):
+    """Snake-case concept ids resolve to kebab-case wiki files (bootstrap layout)."""
+    import json
+
+    root = tmp_path / "chapter"
+    wiki = root / "wiki"
+    wiki.mkdir(parents=True)
+    graph = {
+        "nodes": [
+            {
+                "id": "set_operations",
+                "label": "Set Operations",
+                "source_file": "set-operations.md",
+                "depth": 0,
+            }
+        ],
+        "edges": [],
+    }
+    (root / "concept-graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    (wiki / "set-operations.md").write_text(
+        "# Set Operations\n\nUnion and intersection.\n", encoding="utf-8"
+    )
+    (root / ".approved.json").write_text(json.dumps({"version": 1}), encoding="utf-8")
+
+    preview = load_wiki_preview(root, "published")
+    page = preview["pages"][0]
+    assert page["concept_id"] == "set_operations"
+    assert "Union and intersection." in page["body"]

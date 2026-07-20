@@ -322,7 +322,7 @@ def test_resolve_ignores_stale_stored_order():
     assert resolve_teaching_order(graph) == ["a", "b", "c"]
 
 
-def test_write_teaching_order_persists_without_touching_edges_or_depth(tmp_path: Path):
+def test_write_teaching_order_rewrites_linear_hierarchy(tmp_path: Path):
     directory = tmp_path / "chapter"
     directory.mkdir()
     graph = _graph_with_depths()
@@ -332,8 +332,14 @@ def test_write_teaching_order_persists_without_touching_edges_or_depth(tmp_path:
 
     saved = json.loads((directory / "concept-graph.json").read_text(encoding="utf-8"))
     assert saved["teaching_order"] == ["c", "b", "a"]
-    assert saved["edges"] == graph["edges"]
-    assert {n["id"]: n["depth"] for n in saved["nodes"]} == {"a": 0, "b": 1, "c": 1}
+    # Depth follows list position.
+    assert {n["id"]: n["depth"] for n in saved["nodes"]} == {"c": 0, "b": 1, "a": 2}
+    # Edges become a single linear chain along the order.
+    assert [(e["source"], e["target"]) for e in saved["edges"]] == [
+        ("c", "b"),
+        ("b", "a"),
+    ]
+    assert all(e["relation"] == "prerequisite_of" for e in saved["edges"])
 
 
 def test_write_teaching_order_rejects_non_permutation(tmp_path: Path):

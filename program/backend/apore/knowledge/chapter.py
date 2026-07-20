@@ -196,6 +196,29 @@ def select_next_concept(
     return pool[0].id
 
 
+def resolve_wiki_page(
+    wiki_dir: Path, concept_id: str, source_file: str | None = None
+) -> Path | None:
+    """Locate the wiki page file for a concept within ``wiki_dir``.
+
+    Handles the common mismatch where concept ids are snake_case
+    (``set_operations``) while bootstrapped wiki files stay kebab-case
+    (``set-operations.md``). Tries, in order: ``{concept_id}.md`` / ``.html``,
+    the node's declared ``source_file``, then the kebab-cased id.
+    """
+    candidates = [f"{concept_id}.md", f"{concept_id}.html"]
+    if source_file:
+        candidates.append(source_file)
+    kebab = concept_id.replace("_", "-")
+    if kebab != concept_id:
+        candidates.extend([f"{kebab}.md", f"{kebab}.html"])
+    for name in candidates:
+        candidate = wiki_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def get_wiki_paths(chapter: ChapterContext, concept_id: str, graph: ConceptGraph) -> list[Path]:
     """Wiki files for target concept and DAG neighbors."""
     wiki_dir = chapter.wiki_dir
@@ -203,22 +226,20 @@ def get_wiki_paths(chapter: ChapterContext, concept_id: str, graph: ConceptGraph
         return _legacy_fixture_wiki(chapter.chapter_root, concept_id)
 
     paths: list[Path] = []
-    target = wiki_dir / f"{concept_id}.md"
-    if target.is_file():
+    target_node = graph.get(concept_id)
+    target = resolve_wiki_page(
+        wiki_dir, concept_id, target_node.source_file if target_node else None
+    )
+    if target is not None:
         paths.append(target)
-    else:
-        for ext in (".html", ".md"):
-            alt = wiki_dir / f"{concept_id}{ext}"
-            if alt.is_file():
-                paths.append(alt)
-                break
 
     for neighbor_id in graph.neighbor_ids(concept_id):
-        for ext in (".md", ".html"):
-            p = wiki_dir / f"{neighbor_id}{ext}"
-            if p.is_file() and p not in paths:
-                paths.append(p)
-                break
+        neighbor_node = graph.get(neighbor_id)
+        p = resolve_wiki_page(
+            wiki_dir, neighbor_id, neighbor_node.source_file if neighbor_node else None
+        )
+        if p is not None and p not in paths:
+            paths.append(p)
 
     if paths:
         return paths

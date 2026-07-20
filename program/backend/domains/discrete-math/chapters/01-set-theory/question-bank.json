@@ -212,13 +212,6 @@
       "text": "Synthesize your understanding of set descriptions and Venn diagrams to explain how they complement each other in set theory."
     },
     {
-      "id": "what_is_a_set-recall-01",
-      "concept_id": "what_is_a_set",
-      "type": "recall",
-      "intended_difficulty": 0.1,
-      "text": "What is the basic definition of a set in mathematics?"
-    },
-    {
       "id": "what_is_a_set-recall-02",
       "concept_id": "what_is_a_set",
       "type": "recall",

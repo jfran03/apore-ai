@@ -172,24 +172,33 @@ def select_next_concept(
     mastery: dict[str, float] | None = None,
     scalar: float = 0.5,
     weak_only: bool = False,
+    allowed_concept_ids: set[str] | None = None,
 ) -> str:
     """Pick the next concept id for question generation."""
     mastery = mastery or {}
-    if requested_id and requested_id in graph.nodes:
+    if (
+        requested_id
+        and requested_id in graph.nodes
+        and (allowed_concept_ids is None or requested_id in allowed_concept_ids)
+    ):
         return requested_id
 
     if not graph.nodes:
         return requested_id or "unknown"
 
-    uncovered = [
+    nodes = [
         n
         for n in graph.nodes.values()
-        if mastery.get(n.id, 0.0) < 0.7
+        if allowed_concept_ids is None or n.id in allowed_concept_ids
     ]
+    if not nodes:
+        return requested_id or "unknown"
+
+    uncovered = [n for n in nodes if mastery.get(n.id, 0.0) < 0.7]
     if weak_only:
         pool = uncovered
     else:
-        pool = uncovered or list(graph.nodes.values())
+        pool = uncovered or list(nodes)
     if not pool:
         return requested_id or "unknown"
     pool.sort(key=lambda n: (n.depth, n.id))

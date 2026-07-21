@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { getProviderConfig, setProviderConfig } from '../api/client';
 import type { ProviderConfig } from '../api/types';
+import { DURATION, EASE_OUT, overlayTransition, panel } from '../motion';
 import { buildProviderConfigUpdate, detectApiKeyProvider } from './detectApiKeyProvider';
 
 type GateStatus = 'loading' | 'blocked' | 'ready' | 'load-error';
@@ -11,6 +13,9 @@ function hasKey(cfg: ProviderConfig): boolean {
 
 export function ApiKeyGate() {
   const [status, setStatus] = useState<GateStatus>('loading');
+  const reduceMotion = useReducedMotion();
+  const dialogMotion = panel(reduceMotion);
+  const show = status === 'blocked' || status === 'load-error';
 
   useEffect(() => {
     let cancelled = false;
@@ -28,14 +33,38 @@ export function ApiKeyGate() {
     };
   }, []);
 
-  if (status === 'ready' || status === 'loading') return null;
-
   return (
-    <ApiKeyGateOverlay
-      loadError={status === 'load-error'}
-      onConfigured={() => setStatus('ready')}
-      onRetry={() => setStatus('loading')}
-    />
+    <AnimatePresence>
+      {show && (
+        <motion.div
+          className="api-key-gate"
+          role="dialog"
+          aria-modal="true"
+          aria-label={status === 'load-error' ? 'Configuration unavailable' : 'Add an API key'}
+          initial={reduceMotion ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={reduceMotion ? undefined : { opacity: 0 }}
+          transition={overlayTransition(reduceMotion)}
+        >
+          <motion.div
+            initial={dialogMotion.initial}
+            animate={dialogMotion.animate}
+            exit={
+              reduceMotion
+                ? dialogMotion.exit
+                : { ...dialogMotion.exit, transition: { duration: DURATION.exit, ease: EASE_OUT } }
+            }
+            transition={dialogMotion.transition}
+          >
+            <ApiKeyGateOverlay
+              loadError={status === 'load-error'}
+              onConfigured={() => setStatus('ready')}
+              onRetry={() => setStatus('loading')}
+            />
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -78,17 +107,15 @@ function ApiKeyGateOverlay({ loadError, onConfigured, onRetry }: OverlayProps) {
 
   if (loadError) {
     return (
-      <div className="api-key-gate" role="dialog" aria-modal="true" aria-label="Configuration unavailable">
-        <div className="api-key-gate__dialog">
-          <h2 className="api-key-gate__title">Can't reach the server</h2>
-          <p className="api-key-gate__body">
-            Apore needs to check your provider configuration before you can start.
-          </p>
-          <div className="api-key-gate__actions">
-            <button type="button" className="btn btn--primary" onClick={onRetry}>
-              Retry
-            </button>
-          </div>
+      <div className="api-key-gate__dialog">
+        <h2 className="api-key-gate__title">Can't reach the server</h2>
+        <p className="api-key-gate__body">
+          Apore needs to check your provider configuration before you can start.
+        </p>
+        <div className="api-key-gate__actions">
+          <button type="button" className="btn btn--primary" onClick={onRetry}>
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -106,48 +133,46 @@ function ApiKeyGateOverlay({ loadError, onConfigured, onRetry }: OverlayProps) {
   }
 
   return (
-    <div className="api-key-gate" role="dialog" aria-modal="true" aria-label="Add an API key">
-      <form className="api-key-gate__dialog" onSubmit={handleSubmit}>
-        <h2 className="api-key-gate__title">Add an API key to get started</h2>
-        <p className="api-key-gate__body">
-          Apore brings your own key. Paste an Anthropic or NVIDIA NIM key and we'll set up the right
-          provider for you.
-        </p>
+    <form className="api-key-gate__dialog" onSubmit={handleSubmit}>
+      <h2 className="api-key-gate__title">Add an API key to get started</h2>
+      <p className="api-key-gate__body">
+        Apore brings your own key. Paste an Anthropic or NVIDIA NIM key and we'll set up the right
+        provider for you.
+      </p>
 
-        <label className="api-key-gate__field">
-          <span className="api-key-gate__label">API key</span>
-          <input
-            type="password"
-            className="api-key-gate__input"
-            value={key}
-            onChange={(e) => {
-              setKey(e.target.value);
-              if (error) setError(null);
-            }}
-            placeholder="sk-ant-… or nvapi-…"
-            spellCheck={false}
-            autoComplete="off"
-            autoFocus
-          />
-          <span
-            className={`api-key-gate__hint${detected === null && trimmed.length > 0 ? ' api-key-gate__hint--error' : ''}`}
-          >
-            {hint}
-          </span>
-        </label>
+      <label className="api-key-gate__field">
+        <span className="api-key-gate__label">API key</span>
+        <input
+          type="password"
+          className="api-key-gate__input"
+          value={key}
+          onChange={(e) => {
+            setKey(e.target.value);
+            if (error) setError(null);
+          }}
+          placeholder="sk-ant-… or nvapi-…"
+          spellCheck={false}
+          autoComplete="off"
+          autoFocus
+        />
+        <span
+          className={`api-key-gate__hint${detected === null && trimmed.length > 0 ? ' api-key-gate__hint--error' : ''}`}
+        >
+          {hint}
+        </span>
+      </label>
 
-        {error && <p className="api-key-gate__error">{error}</p>}
+      {error && <p className="api-key-gate__error">{error}</p>}
 
-        <div className="api-key-gate__actions">
-          <button
-            type="submit"
-            className="btn btn--primary"
-            disabled={saving || detected === null}
-          >
-            {saving ? 'Saving…' : 'Save key'}
-          </button>
-        </div>
-      </form>
-    </div>
+      <div className="api-key-gate__actions">
+        <button
+          type="submit"
+          className="btn btn--primary"
+          disabled={saving || detected === null}
+        >
+          {saving ? 'Saving…' : 'Save key'}
+        </button>
+      </div>
+    </form>
   );
 }

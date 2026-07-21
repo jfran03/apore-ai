@@ -30,6 +30,8 @@ def test_create_session():
     assert data["focus_mode"] == "adaptive"
     assert data["max_questions"] == 10
     assert isinstance(data["scalar"], float)
+    assert data["concept_ids"] == ["sets_definition", "set_theory_intro"]
+    assert "—" in data["title"] or "Adaptive" in data["title"]
 
 
 def test_create_session_with_config():
@@ -46,12 +48,19 @@ def test_create_session_with_config():
     assert data["focus_mode"] == "weak_points"
     assert data["max_questions"] == 5
     assert data["title"]
+    assert "Weak Areas Review" in data["title"] or data["title_pending"] is True
 
     state = client.get(f"/sessions/{data['session_id']}/state").json()
-    assert state["title"] == data["title"]
+    # Title may already have been swapped by the background LLM job.
+    assert state["title"]
+    if not state["title_pending"]:
+        assert state["title"]
+    else:
+        assert state["title"] == data["title"]
     assert state["focus_mode"] == "weak_points"
     assert state["max_questions"] == 5
     assert state["questions_remaining"] == 5
+    assert state["concept_ids"]
 
 
 def _rate_question(session_id: str, rating: str = "ok"):
@@ -95,6 +104,80 @@ def test_max_questions_session_complete_and_guard():
 
     blocked = client.post(f"/sessions/{session_id}/question", json={})
     assert blocked.status_code == 409
+
+    state = client.get(f"/sessions/{session_id}/state").json()
+    assert state["status"] == "completed"
+    assert state["ended_at"]
+
+
+def test_end_session_early_mid_question():
+    session_id, _ = _start_session_with_question()
+
+    # Unfinished dialogue — should not become a question-log row.
+    client.post(
+        f"/sessions/{session_id}/turn",
+        json={"learner_message": "I need help understanding this question"},
+    )
+
+    end = client.post(f"/sessions/{session_id}/end")
+    assert end.status_code == 200
+    data = end.json()
+    assert data["status"] == "ended_early"
+    assert data["ended_at"]
+    assert data["question_count"] == 0
+
+    # Idempotent
+    end2 = client.post(f"/sessions/{session_id}/end")
+    assert end2.status_code == 200
+    assert end2.json()["ended_at"] == data["ended_at"]
+
+    blocked_q = client.post(f"/sessions/{session_id}/question", json={})
+    assert blocked_q.status_code == 409
+    blocked_turn = client.post(
+        f"/sessions/{session_id}/turn",
+        json={"learner_message": "still going"},
+    )
+    assert blocked_turn.status_code == 409
+
+    transcript = client.get(f"/sessions/{session_id}/transcript").json()
+    assert transcript["status"] == "ended_early"
+    assert transcript["ended_at"] == data["ended_at"]
+    # No completed question log rows for the abandoned question.
+    body_lines = [
+        ln for ln in transcript["body"].splitlines() if ln.startswith("| ") and "Q#" not in ln and "---" not in ln
+    ]
+    assert body_lines == []
+
+
+def test_end_session_keeps_completed_questions():
+    resp = client.post(
+        "/sessions",
+        json={"knowledge_source": TEST_KNOWLEDGE_SOURCE, "max_questions": 5},
+    )
+    session_id = resp.json()["session_id"]
+    assert client.post(f"/sessions/{session_id}/question", json={}).status_code == 200
+    assert _complete_question(session_id).status_code == 200
+
+    assert client.post(f"/sessions/{session_id}/question", json={}).status_code == 200
+    end = client.post(f"/sessions/{session_id}/end")
+    assert end.status_code == 200
+    assert end.json()["question_count"] == 1
+
+    transcript = client.get(f"/sessions/{session_id}/transcript").json()
+    assert transcript["status"] == "ended_early"
+    assert "| 1 |" in transcript["body"]
+    # Only one completed log row.
+    data_rows = [
+        ln
+        for ln in transcript["body"].splitlines()
+        if ln.startswith("| ") and "| Q#" not in ln and "|---" not in ln and "---|" not in ln
+    ]
+    assert len(data_rows) == 1
+
+
+def test_end_unknown_session_404():
+    resp = client.post("/sessions/00000000-0000-0000-0000-000000000000/end")
+    assert resp.status_code == 404
 
 
 def test_create_session_legacy_fixture_field():
@@ -391,3 +474,191 @@ def test_turn_continue_and_message_exclusive_400():
 def test_unknown_session_returns_404():
     resp = client.get("/sessions/nonexistent-session-id/state")
     assert resp.status_code == 404
+
+
+def test_create_session_with_concept_subset():
+    resp = client.post(
+        "/sessions",
+        json={
+            "knowledge_source": TEST_KNOWLEDGE_SOURCE,
+            "concept_ids": ["set_theory_intro"],
+            "max_questions": 3,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["concept_ids"] == ["set_theory_intro"]
+    assert data["title"]
+
+    state = client.get(f"/sessions/{data['session_id']}/state").json()
+    assert state["concept_ids"] == ["set_theory_intro"]
+
+    q = client.post(f"/sessions/{data['session_id']}/question", json={})
+    assert q.status_code == 200
+    assert q.json()["concept_id"] == "set_theory_intro"
+
+
+def test_create_session_rejects_empty_concept_ids():
+    resp = client.post(
+        "/sessions",
+        json={"knowledge_source": TEST_KNOWLEDGE_SOURCE, "concept_ids": []},
+    )
+    assert resp.status_code == 400
+    assert "at least one" in resp.json()["detail"].lower()
+
+
+def test_create_session_rejects_unknown_concept_ids():
+    resp = client.post(
+        "/sessions",
+        json={
+            "knowledge_source": TEST_KNOWLEDGE_SOURCE,
+            "concept_ids": ["sets_definition", "not_a_real_concept"],
+        },
+    )
+    assert resp.status_code == 400
+    assert "Unknown concept" in resp.json()["detail"]
+
+
+def test_create_session_rejects_duplicate_concept_ids():
+    resp = client.post(
+        "/sessions",
+        json={
+            "knowledge_source": TEST_KNOWLEDGE_SOURCE,
+            "concept_ids": ["sets_definition", "sets_definition"],
+        },
+    )
+    assert resp.status_code == 400
+    assert "Duplicate" in resp.json()["detail"]
+
+
+def test_create_session_title_is_deterministic_without_provider_invoke(monkeypatch):
+    """Create + first question stay sync-fast; title LLM runs only in background."""
+    import threading
+    import time
+
+    import apore.api.app as app_module
+    from apore.providers.stub import StubProvider
+
+    gate = threading.Event()
+    invoke_started = threading.Event()
+    calls: list[object] = []
+
+    class GatedTitleProvider(StubProvider):
+        def invoke(self, system, messages, model, config=None):
+            protocol = (config or {}).get("protocol")
+            if protocol == "generate-session-title":
+                calls.append(protocol)
+                invoke_started.set()
+                assert gate.wait(timeout=2), "title job was not released"
+                return "LLM Session Title"
+            return super().invoke(system, messages, model, config)
+
+    monkeypatch.setattr(app_module, "get_active_provider", lambda: "stub")
+    monkeypatch.setattr(app_module, "get_provider", lambda _name: GatedTitleProvider())
+
+    resp = client.post("/sessions", json={"knowledge_source": TEST_KNOWLEDGE_SOURCE})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["title_pending"] is True
+    assert "Adaptive Practice" in data["title"]
+    # Create response returned before we release the gated LLM call.
+    assert invoke_started.wait(timeout=2)
+    # First question must still work while title job is in flight.
+    q = client.post(f"/sessions/{data['session_id']}/question", json={})
+    assert q.status_code == 200
+
+    gate.set()
+    deadline = time.time() + 2
+    final = None
+    while time.time() < deadline:
+        state = client.get(f"/sessions/{data['session_id']}/state").json()
+        if not state["title_pending"]:
+            final = state
+            break
+        time.sleep(0.05)
+    assert final is not None
+    assert final["title"] == "LLM Session Title"
+    assert final["title_pending"] is False
+    assert calls == ["generate-session-title"]
+
+
+def test_create_session_title_pending_false_without_provider(monkeypatch):
+    import apore.api.app as app_module
+
+    monkeypatch.setattr(app_module, "get_active_provider", lambda: None)
+
+    resp = client.post("/sessions", json={"knowledge_source": TEST_KNOWLEDGE_SOURCE})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["title_pending"] is False
+    assert "Adaptive Practice" in data["title"]
+    state = client.get(f"/sessions/{data['session_id']}/state").json()
+    assert state["title_pending"] is False
+    assert state["title"] == data["title"]
+
+
+def test_background_title_failure_keeps_fallback(monkeypatch):
+    import time
+
+    import apore.api.app as app_module
+
+    class BoomProvider:
+        def invoke(self, *args, **kwargs):
+            raise RuntimeError("title boom")
+
+    monkeypatch.setattr(app_module, "get_active_provider", lambda: "stub")
+    monkeypatch.setattr(app_module, "get_provider", lambda _name: BoomProvider())
+
+    resp = client.post("/sessions", json={"knowledge_source": TEST_KNOWLEDGE_SOURCE})
+    assert resp.status_code == 200
+    data = resp.json()
+    fallback = data["title"]
+    assert data["title_pending"] is True
+
+    deadline = time.time() + 2
+    final = None
+    while time.time() < deadline:
+        state = client.get(f"/sessions/{data['session_id']}/state").json()
+        if not state["title_pending"]:
+            final = state
+            break
+        time.sleep(0.05)
+    assert final is not None
+    assert final["title"] == fallback
+    assert final["title_pending"] is False
+
+
+def test_session_persists_concept_ids_in_markdown():
+    import apore.api.app as app_module
+
+    resp = client.post(
+        "/sessions",
+        json={
+            "knowledge_source": TEST_KNOWLEDGE_SOURCE,
+            "concept_ids": ["sets_definition"],
+        },
+    )
+    assert resp.status_code == 200
+    session_id = resp.json()["session_id"]
+    path = app_module.SESSIONS_DIR / f"{session_id}.md"
+    text = path.read_text(encoding="utf-8")
+    assert "concept_ids: sets_definition" in text
+
+
+def test_write_title_updates_markdown_h1(tmp_path):
+    from apore.runtime import state as state_mod
+
+    path = tmp_path / "session.md"
+    state_mod.initialize(
+        path,
+        title="Old Title",
+        session_id="abc",
+        created_at="2026-01-01T00:00:00Z",
+        knowledge_source=TEST_KNOWLEDGE_SOURCE,
+        focus_mode="adaptive",
+        max_questions=5,
+        concept_ids=["sets_definition"],
+    )
+    state_mod.write_title(path, "New Fancy Title")
+    assert state_mod.read_title(path) == "New Fancy Title"
+    assert path.read_text(encoding="utf-8").startswith("# New Fancy Title\n")

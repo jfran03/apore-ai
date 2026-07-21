@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   approveCompile,
   getChapterArtifact,
   startCompile,
 } from '../../api/client';
 import type { ChapterArtifactStatus } from '../../api/types';
+import { DURATION, EASE_OUT } from '../../motion';
 import { useActiveDomain } from '../../shell/ActiveDomainContext';
 import { ChapterRail } from './ChapterRail';
 import { SourcesPanel } from './SourcesPanel';
@@ -28,6 +30,7 @@ export function DomainSetupWorkbench() {
   const [tab, setTab] = useState<Tab>('sources');
   const [artifact, setArtifact] = useState<ChapterArtifactStatus | null>(null);
   const pollRef = useRef<number | null>(null);
+  const reduceMotion = useReducedMotion();
 
   const knowledgeSource = activeChapter?.knowledge_source ?? null;
 
@@ -117,6 +120,11 @@ export function DomainSetupWorkbench() {
     }
   }
 
+  const tabTransition = {
+    duration: reduceMotion ? 0 : DURATION.enter,
+    ease: EASE_OUT,
+  };
+
   return (
     <div className="wb">
       <ChapterRail />
@@ -144,30 +152,56 @@ export function DomainSetupWorkbench() {
             </div>
 
             <div className="wb-tabpanel" role="tabpanel">
-              {tab === 'sources' && knowledgeSource && (
-                <SourcesPanel
-                  knowledgeSource={knowledgeSource}
-                  compileStage={artifact?.compile.stage ?? 'idle'}
-                  onSourcesChanged={handleSourcesChanged}
-                  onCompile={handleCompile}
-                />
-              )}
-              {tab === 'wiki' && knowledgeSource && (
-                <CompiledWikiPanel
-                  knowledgeSource={knowledgeSource}
-                  artifact={artifact}
-                  onApprove={handleApprove}
-                  onRetryCompile={handleCompile}
-                />
-              )}
-              {tab === 'questions' && knowledgeSource && (
-                <QuestionBankPanel
-                  knowledgeSource={knowledgeSource}
-                  canGenerate={canGenerate}
-                  generateBlockedReason={generateBlockedReason}
-                  onGenerated={() => refreshCatalog().catch(() => undefined)}
-                />
-              )}
+              <AnimatePresence mode="wait" initial={false}>
+                {tab === 'sources' && knowledgeSource && (
+                  <motion.div
+                    key="sources"
+                    initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
+                    transition={tabTransition}
+                  >
+                    <SourcesPanel
+                      knowledgeSource={knowledgeSource}
+                      compileStage={artifact?.compile.stage ?? 'idle'}
+                      onSourcesChanged={handleSourcesChanged}
+                      onCompile={handleCompile}
+                    />
+                  </motion.div>
+                )}
+                {tab === 'wiki' && knowledgeSource && (
+                  <motion.div
+                    key="wiki"
+                    initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
+                    transition={tabTransition}
+                  >
+                    <CompiledWikiPanel
+                      knowledgeSource={knowledgeSource}
+                      artifact={artifact}
+                      onApprove={handleApprove}
+                      onRetryCompile={handleCompile}
+                    />
+                  </motion.div>
+                )}
+                {tab === 'questions' && knowledgeSource && (
+                  <motion.div
+                    key="questions"
+                    initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
+                    transition={tabTransition}
+                  >
+                    <QuestionBankPanel
+                      knowledgeSource={knowledgeSource}
+                      canGenerate={canGenerate}
+                      generateBlockedReason={generateBlockedReason}
+                      onGenerated={() => refreshCatalog().catch(() => undefined)}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </>
         )}

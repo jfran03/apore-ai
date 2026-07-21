@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { getProviderConfig, setProviderConfig } from '../api/client';
 import type { ProviderConfig, ProviderConfigUpdate } from '../api/types';
+import { popover } from '../motion';
+import { getStoredTheme, setTheme, type Theme } from './theme';
 
 export function SettingsPopover() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
+  const panelMotion = popover(reduceMotion);
 
   useEffect(() => {
     if (!open) return;
@@ -35,12 +40,18 @@ export function SettingsPopover() {
       >
         ⚙
       </button>
-      {open && <SettingsPanel />}
+      <AnimatePresence>
+        {open && <SettingsPanel motionProps={panelMotion} />}
+      </AnimatePresence>
     </div>
   );
 }
 
-function SettingsPanel() {
+function SettingsPanel({
+  motionProps,
+}: {
+  motionProps: ReturnType<typeof popover>;
+}) {
   const [config, setConfig] = useState<ProviderConfig | null>(null);
   const [anthropicKey, setAnthropicKey] = useState('');
   const [nimKey, setNimKey] = useState('');
@@ -49,11 +60,17 @@ function SettingsPanel() {
   const [nimTouched, setNimTouched] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [theme, setThemeState] = useState<Theme>(() => getStoredTheme());
 
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleThemeChange(next: Theme) {
+    setThemeState(next);
+    setTheme(next);
+  }
 
   async function refresh() {
     try {
@@ -90,7 +107,35 @@ function SettingsPanel() {
     : 'No provider configured';
 
   return (
-    <div className="settings__panel" role="dialog" aria-label="Settings">
+    <motion.div
+      className="settings__panel"
+      role="dialog"
+      aria-label="Settings"
+      initial={motionProps.initial}
+      animate={motionProps.animate}
+      exit={motionProps.exit}
+      transition={motionProps.transition}
+    >
+      <div className="settings__theme">
+        <span className="settings__label" id="settings-theme-label">
+          Appearance
+        </span>
+        <label className="theme-switch">
+          <span className="theme-switch__text">Light</span>
+          <input
+            type="checkbox"
+            className="theme-switch__input"
+            checked={theme === 'dark'}
+            onChange={(e) => handleThemeChange(e.target.checked ? 'dark' : 'light')}
+            aria-labelledby="settings-theme-label"
+          />
+          <span className="theme-switch__track" aria-hidden="true">
+            <span className="theme-switch__thumb" />
+          </span>
+          <span className="theme-switch__text">Dark</span>
+        </label>
+      </div>
+
       {loadError && <p className="settings__error">Could not load config: {loadError}</p>}
       <p className="settings__status">
         Active provider: <strong>{activeProviderLabel}</strong>
@@ -162,17 +207,6 @@ function SettingsPanel() {
           <span className="settings__error">Save failed — is the server running?</span>
         )}
       </div>
-
-      <p className="settings__meta">
-        v0.1.0-prototype · apore-lite @ 17f4dfa4 ·{' '}
-        <a
-          href="https://github.com/apore-research/prototype#readme"
-          target="_blank"
-          rel="noreferrer"
-        >
-          README
-        </a>
-      </p>
-    </div>
+    </motion.div>
   );
 }

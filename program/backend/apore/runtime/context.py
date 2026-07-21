@@ -47,6 +47,13 @@ def assemble_prompt(
         f"## Learner State\n\n{learner_state_text}"
     )
 
+    if protocol != "extract-signals":
+        domain_md = chapter.chapter_root.parent.parent / "DOMAIN.md"
+        if domain_md.is_file():
+            domain_text = domain_md.read_text(encoding="utf-8").strip()
+            if domain_text:
+                user_content = f"## Domain Guidance\n\n{domain_text}\n\n{user_content}"
+
     return {
         "system": system,
         "messages": [{"role": "user", "content": user_content}],

@@ -22,6 +22,7 @@
   --color-timeline-done: #c08532;
   --color-semantic-error: #cf2d56;
   --color-semantic-success: #1f8a65;
+  --color-semantic-warning: #c07800;
 
   /* Typography */
   --font-sans: CursorGothic, system-ui, Helvetica, Arial, sans-serif;
@@ -60,4 +61,26 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-pill: 9999px;
+}
+
+/* Dark theme — warm near-black surfaces, orange accent preserved */
+[data-theme='dark'] {
+  --color-primary: #f54e00;
+  --color-primary-active: #d04200;
+  --color-ink: #ece9df;
+  --color-body: #b3afa2;
+  --color-body-strong: #ece9df;
+  --color-muted: #8f8b7e;
+  --color-muted-soft: #6d6a5f;
+  --color-hairline: #33322a;
+  --color-hairline-soft: #26251d;
+  --color-hairline-strong: #45443a;
+  --color-canvas: #17160f;
+  --color-canvas-soft: #201e17;
+  --color-surface-card: #201e17;
+  --color-surface-strong: #2b2920;
+  --color-on-primary: #ffffff;
+  --color-semantic-error: #f0567d;
+  --color-semantic-success: #34b088;
+  --color-semantic-warning: #d99a2b;
 }

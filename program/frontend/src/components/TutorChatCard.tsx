@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useProgressiveReveal } from '../hooks/useProgressiveReveal';
+import { DURATION, transition } from '../motion';
 import { TutorGeneratingRow } from './TutorGeneratingRow';
 import type { GradeResult } from './SignalCapture';
 
@@ -28,8 +29,6 @@ interface TutorChatCardProps {
 }
 
 type Rating = 'easy' | 'ok' | 'hard';
-
-const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 function extractCitation(text: string): { main: string; citation: string | null } {
   const match = text.match(/\[Source:[^\]]+\]/);
@@ -61,7 +60,7 @@ function TutorMessage({ content, reduceMotion }: { content: string; reduceMotion
       className="tutor-chat__tutor"
       initial={reduceMotion ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: EASE_OUT }}
+      transition={transition(DURATION.soft, reduceMotion)}
     >
       <p className="tutor-chat__tutor-text">{main}</p>
       {citation && <p className="tutor-chat__citation">{citation}</p>}
@@ -157,7 +156,7 @@ export function TutorChatCard({
                 className="tutor-chat__learner"
                 initial={reduceMotion ? false : { opacity: 0, x: 16, scale: 0.98 }}
                 animate={{ opacity: 1, x: 0, scale: 1 }}
-                transition={{ duration: 0.22, ease: EASE_OUT }}
+                transition={transition(DURATION.soft, reduceMotion)}
               >
                 {msg.content}
               </motion.p>
@@ -177,7 +176,7 @@ export function TutorChatCard({
               initial={reduceMotion ? false : { opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
-              transition={{ duration: 0.15, ease: EASE_OUT }}
+              transition={transition(DURATION.exit, reduceMotion)}
             >
               <TutorGeneratingRow />
             </motion.div>
@@ -203,7 +202,7 @@ export function TutorChatCard({
           className="tutor-chat__rating-block"
           initial={reduceMotion ? false : { opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22, ease: EASE_OUT }}
+          transition={transition(DURATION.soft, reduceMotion)}
         >
           <div
             className={`signal-capture__verdict signal-capture__verdict--${verdictCorrect ? 'correct' : 'incorrect'}`}
@@ -245,7 +244,7 @@ export function TutorChatCard({
         <motion.div
           className="tutor-chat__composer-wrap"
           layout
-          transition={{ duration: reduceMotion ? 0 : 0.2, ease: EASE_OUT }}
+          transition={transition(DURATION.soft, reduceMotion)}
         >
           <div
             className={`tutor-chat__composer-island${inputLocked ? ' tutor-chat__composer-island--locked' : ''}`}
@@ -276,7 +275,7 @@ export function TutorChatCard({
                 onClick={() => void handleSend()}
                 aria-label={chatStatus === 'generating' ? 'Sending' : 'Send message'}
                 whileTap={reduceMotion || !canSend ? undefined : { scale: 0.94 }}
-                transition={{ duration: 0.12, ease: EASE_OUT }}
+                transition={transition(DURATION.micro, reduceMotion)}
               >
                 <SendIcon />
               </motion.button>
@@ -289,7 +288,7 @@ export function TutorChatCard({
         <motion.div
           className="tutor-chat__composer-wrap"
           layout
-          transition={{ duration: reduceMotion ? 0 : 0.2, ease: EASE_OUT }}
+          transition={transition(DURATION.soft, reduceMotion)}
         >
           <div
             className={`tutor-chat__composer-island${inputLocked ? ' tutor-chat__composer-island--locked' : ''}`}
@@ -324,7 +323,7 @@ export function TutorChatCard({
                 onClick={() => void handleSend()}
                 aria-label={chatStatus === 'generating' ? 'Sending' : 'Send message'}
                 whileTap={reduceMotion || !canSend ? undefined : { scale: 0.94 }}
-                transition={{ duration: 0.12, ease: EASE_OUT }}
+                transition={transition(DURATION.micro, reduceMotion)}
               >
                 <SendIcon />
               </motion.button>

@@ -19,6 +19,7 @@ import type {
   QuestionBankGenerateStatus,
   SessionListResponse,
   SessionTranscript,
+  EndSessionResponse,
   SourceEntry,
   SourceListResult,
   ChapterArtifactStatus,
@@ -42,6 +43,7 @@ function domainChapterBase(knowledgeSource: string): string {
 }
 
 const KNOWLEDGE_SOURCE_KEY = 'apore.knowledge_source';
+const ONBOARDING_COMPLETE_KEY = 'apore.onboarding_complete';
 
 export function getStoredKnowledgeSource(): string {
   return localStorage.getItem(KNOWLEDGE_SOURCE_KEY) ?? 'domain:discrete-math/01-set-theory';
@@ -49,6 +51,14 @@ export function getStoredKnowledgeSource(): string {
 
 export function setStoredKnowledgeSource(source: string): void {
   localStorage.setItem(KNOWLEDGE_SOURCE_KEY, source);
+}
+
+export function isOnboardingComplete(): boolean {
+  return localStorage.getItem(ONBOARDING_COMPLETE_KEY) === '1';
+}
+
+export function setOnboardingComplete(): void {
+  localStorage.setItem(ONBOARDING_COMPLETE_KEY, '1');
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -130,11 +140,44 @@ export async function fetchFixture(name: string): Promise<FixtureFetchResult> {
   return apiFetch<FixtureFetchResult>(`/setup/fixtures/${name}/fetch`, { method: 'POST' });
 }
 
-export async function createDomain(domainId: string): Promise<{ domain_id: string; path: string }> {
+export async function createDomain(
+  domainId: string,
+  meta?: {
+    name?: string;
+    scope?: string;
+    goal?: string;
+    tutor_style?: string;
+  },
+): Promise<{ domain_id: string; path: string }> {
   return apiFetch('/setup/domains', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain_id: domainId }),
+    body: JSON.stringify({
+      domain_id: domainId,
+      ...(meta?.name != null ? { name: meta.name } : {}),
+      ...(meta?.scope != null ? { scope: meta.scope } : {}),
+      ...(meta?.goal != null ? { goal: meta.goal } : {}),
+      ...(meta?.tutor_style != null ? { tutor_style: meta.tutor_style } : {}),
+    }),
+  });
+}
+
+export async function renameDomain(
+  domainId: string,
+  newDomainId: string,
+): Promise<{ domain_id: string; path: string; sessions_updated: number }> {
+  return apiFetch(`/setup/domains/${encodeURIComponent(domainId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain_id: newDomainId }),
+  });
+}
+
+export async function deleteDomain(
+  domainId: string,
+): Promise<{ domain_id: string; deleted: boolean; sessions_deleted: number }> {
+  return apiFetch(`/setup/domains/${encodeURIComponent(domainId)}`, {
+    method: 'DELETE',
   });
 }
 
@@ -149,7 +192,32 @@ export async function createChapter(
   });
 }
 
-export async function uploadSources(
+export async function renameChapter(
+  domainId: string,
+  chapterId: string,
+  newChapterId: string,
+): Promise<{ chapter_id: string; knowledge_source: string }> {
+  return apiFetch(
+    `/setup/domains/${encodeURIComponent(domainId)}/chapters/${encodeURIComponent(chapterId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chapter_id: newChapterId }),
+    },
+  );
+}
+
+export async function deleteChapter(
+  domainId: string,
+  chapterId: string,
+): Promise<{ deleted: boolean }> {
+  return apiFetch(
+    `/setup/domains/${encodeURIComponent(domainId)}/chapters/${encodeURIComponent(chapterId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+async function postSourceFiles(
   domainId: string,
   chapterId: string,
   files: File[],
@@ -162,8 +230,38 @@ export async function uploadSources(
     `${API_BASE_URL}/setup/domains/${domainId}/chapters/${chapterId}/sources`,
     { method: 'POST', body: form },
   );
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    try {
+      const parsed = JSON.parse(body) as { detail?: string };
+      if (typeof parsed.detail === 'string') {
+        throw new Error(parsed.detail);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name !== 'SyntaxError') {
+        throw err;
+      }
+    }
+    throw new Error(`HTTP ${res.status}: ${body}`);
+  }
   return res.json();
+}
+
+export async function uploadSources(
+  domainId: string,
+  chapterId: string,
+  files: File[],
+): Promise<{ uploaded: string[] }> {
+  return postSourceFiles(domainId, chapterId, files);
+}
+
+/** Upload a single source file (one request per file for parallel queues). */
+export async function uploadSource(
+  domainId: string,
+  chapterId: string,
+  file: File,
+): Promise<{ uploaded: string[] }> {
+  return postSourceFiles(domainId, chapterId, [file]);
 }
 
 export async function stubCompileChapter(
@@ -259,6 +357,12 @@ export async function deleteQuestionBankEntry(
 
 export async function listSessions(): Promise<SessionListResponse> {
   return apiFetch<SessionListResponse>('/sessions');
+}
+
+export async function endSession(sessionId: string): Promise<EndSessionResponse> {
+  return apiFetch<EndSessionResponse>(`/sessions/${encodeURIComponent(sessionId)}/end`, {
+    method: 'POST',
+  });
 }
 
 export async function getSessionTranscript(sessionId: string): Promise<SessionTranscript> {

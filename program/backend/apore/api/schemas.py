@@ -21,6 +21,13 @@ class CreateSessionRequest(BaseModel):
         description='Question selection strategy: "adaptive" or "weak_points"',
     )
     max_questions: int = Field(default=10, ge=1, le=50)
+    concept_ids: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional subset of compiled concept ids to practice. "
+            "When omitted, all concepts with bank questions are included."
+        ),
+    )
 
 
 class CreateSessionResponse(BaseModel):
@@ -31,6 +38,8 @@ class CreateSessionResponse(BaseModel):
     knowledge_source: str
     focus_mode: str
     max_questions: int
+    concept_ids: list[str] = Field(default_factory=list)
+    title_pending: bool = False
 
 
 class TurnRequest(BaseModel):
@@ -114,6 +123,21 @@ class SessionStateResponse(BaseModel):
     max_questions: int
     questions_remaining: int
     active_concept_id: str | None = None
+    concept_ids: list[str] = Field(default_factory=list)
+    title_pending: bool = False
+    status: Literal["active", "completed", "ended_early"] = "active"
+    ended_at: str | None = None
+
+
+class EndSessionResponse(BaseModel):
+    session_id: str
+    status: Literal["ended_early"]
+    ended_at: str
+    title: str
+    knowledge_source: str
+    question_count: int
+    max_questions: int
+    scalar: float
 
 
 class ProviderConfigResponse(BaseModel):
@@ -150,9 +174,21 @@ class BatchRunResponse(BaseModel):
 
 class CreateDomainRequest(BaseModel):
     domain_id: str
+    name: str | None = None
+    scope: str | None = None
+    goal: str | None = None
+    tutor_style: str | None = None
+
+
+class RenameDomainRequest(BaseModel):
+    domain_id: str
 
 
 class CreateChapterRequest(BaseModel):
+    chapter_id: str
+
+
+class RenameChapterRequest(BaseModel):
     chapter_id: str
 
 
@@ -222,6 +258,8 @@ class SessionSummary(BaseModel):
     title: str
     created_at: str
     knowledge_source: str
+    status: Literal["active", "completed", "ended_early"] = "active"
+    ended_at: str | None = None
 
 
 class SessionListResponse(BaseModel):
@@ -235,6 +273,8 @@ class SessionTranscriptResponse(BaseModel):
     knowledge_source: str
     focus_mode: str
     max_questions: int
+    status: Literal["active", "completed", "ended_early"] = "active"
+    ended_at: str | None = None
     body: str
 
 

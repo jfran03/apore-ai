@@ -10,9 +10,15 @@ import {
 import {
   getKnowledgeCatalog,
   getStoredKnowledgeSource,
+  listSessions,
   setStoredKnowledgeSource,
 } from '../api/client';
-import type { KnowledgeCatalog, KnowledgeChapter, KnowledgeDomain } from '../api/types';
+import type {
+  KnowledgeCatalog,
+  KnowledgeChapter,
+  KnowledgeDomain,
+  SessionSummary,
+} from '../api/types';
 
 export function parseKnowledgeSource(
   source: string,
@@ -28,13 +34,17 @@ interface ActiveDomainValue {
   catalog: KnowledgeCatalog | null;
   catalogError: string | null;
   catalogLoading: boolean;
+  sessions: SessionSummary[];
+  sessionsLoaded: boolean;
   activeDomainId: string | null;
   activeDomain: KnowledgeDomain | null;
   activeChapterId: string | null;
   activeChapter: KnowledgeChapter | null;
   setActiveDomainId: (domainId: string) => void;
   setActiveChapterId: (chapterId: string) => void;
+  selectDomainChapter: (domainId: string, chapterId: string) => void;
   refreshCatalog: () => Promise<void>;
+  refreshSessions: () => Promise<void>;
 }
 
 const ActiveDomainContext = createContext<ActiveDomainValue | null>(null);
@@ -43,6 +53,8 @@ export function ActiveDomainProvider({ children }: { children: ReactNode }) {
   const [catalog, setCatalog] = useState<KnowledgeCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const storedSource = parseKnowledgeSource(getStoredKnowledgeSource());
   const [activeDomainId, setActiveDomainIdState] = useState<string | null>(
     () => storedSource?.domainId ?? null,
@@ -64,11 +76,27 @@ export function ActiveDomainProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshSessions = useCallback(async () => {
+    try {
+      const res = await listSessions();
+      setSessions(res.sessions);
+      setSessionsLoaded(true);
+    } catch {
+      // Keep previous sessions; do not surface errors here.
+    }
+  }, []);
+
   useEffect(() => {
     refreshCatalog().catch(() => {
       /* error surfaced via catalogError */
     });
   }, [refreshCatalog]);
+
+  useEffect(() => {
+    refreshSessions().catch(() => {
+      /* keep previous / unloaded */
+    });
+  }, [refreshSessions]);
 
   // Reconcile the active domain/chapter against the catalog. Only corrects
   // selections that no longer exist; explicit user choices are preserved.
@@ -107,6 +135,15 @@ export function ActiveDomainProvider({ children }: { children: ReactNode }) {
     [catalog, activeDomainId],
   );
 
+  const selectDomainChapter = useCallback(
+    (domainId: string, chapterId: string) => {
+      setActiveDomainIdState(domainId);
+      setActiveChapterIdState(chapterId);
+      setStoredKnowledgeSource(`domain:${domainId}/${chapterId}`);
+    },
+    [],
+  );
+
   const activeDomain = catalog?.domains.find((d) => d.id === activeDomainId) ?? null;
   const activeChapter =
     activeDomain?.chapters.find((c) => c.id === activeChapterId) ?? null;
@@ -116,25 +153,33 @@ export function ActiveDomainProvider({ children }: { children: ReactNode }) {
       catalog,
       catalogError,
       catalogLoading,
+      sessions,
+      sessionsLoaded,
       activeDomainId,
       activeDomain,
       activeChapterId,
       activeChapter,
       setActiveDomainId,
       setActiveChapterId,
+      selectDomainChapter,
       refreshCatalog,
+      refreshSessions,
     }),
     [
       catalog,
       catalogError,
       catalogLoading,
+      sessions,
+      sessionsLoaded,
       activeDomainId,
       activeDomain,
       activeChapterId,
       activeChapter,
       setActiveDomainId,
       setActiveChapterId,
+      selectDomainChapter,
       refreshCatalog,
+      refreshSessions,
     ],
   );
 

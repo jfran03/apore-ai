@@ -3,6 +3,7 @@ export interface CreateSessionRequest {
   fixture?: string;
   focus_mode?: 'adaptive' | 'weak_points';
   max_questions?: number;
+  concept_ids?: string[];
 }
 
 export interface CreateSessionResponse {
@@ -13,6 +14,8 @@ export interface CreateSessionResponse {
   knowledge_source: string;
   focus_mode: 'adaptive' | 'weak_points';
   max_questions: number;
+  concept_ids: string[];
+  title_pending?: boolean;
 }
 
 export interface QuestionRequest {
@@ -79,6 +82,8 @@ export interface SessionStateResponse {
   max_questions: number;
   questions_remaining: number;
   active_concept_id?: string | null;
+  concept_ids: string[];
+  title_pending?: boolean;
 }
 
 export interface ProviderConfig {
@@ -263,11 +268,15 @@ export interface QuestionBankGenerateStatus {
   started_at: string | null;
 }
 
+export type SessionLifecycleStatus = 'active' | 'completed' | 'ended_early';
+
 export interface SessionSummary {
   session_id: string;
   title: string;
   created_at: string;
   knowledge_source: string;
+  status?: SessionLifecycleStatus;
+  ended_at?: string | null;
 }
 
 export interface SessionListResponse {
@@ -281,5 +290,18 @@ export interface SessionTranscript {
   knowledge_source: string;
   focus_mode: string;
   max_questions: number;
+  status?: SessionLifecycleStatus;
+  ended_at?: string | null;
   body: string;
+}
+
+export interface EndSessionResponse {
+  session_id: string;
+  status: 'ended_early';
+  ended_at: string;
+  title: string;
+  knowledge_source: string;
+  question_count: number;
+  max_questions: number;
+  scalar: number;
 }

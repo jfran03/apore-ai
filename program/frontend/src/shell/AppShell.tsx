@@ -1,18 +1,24 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { ApiKeyGate } from './ApiKeyGate';
+import { StudyFocusProvider } from './StudyFocusContext';
 import { TopBar } from './TopBar';
 import '../styles/shell.css';
 
 export function AppShell() {
+  const { pathname } = useLocation();
+  const landing = pathname === '/';
+
   return (
-    <div className="shell">
-      <TopBar />
-      <div className="shell__body">
-        <div className="shell__content">
-          <Outlet />
+    <StudyFocusProvider>
+      <div className={`shell${landing ? ' shell--landing' : ''}`}>
+        <TopBar />
+        <div className="shell__body">
+          <div className="shell__content">
+            <Outlet />
+          </div>
         </div>
+        <ApiKeyGate />
       </div>
-      <ApiKeyGate />
-    </div>
+    </StudyFocusProvider>
   );
 }

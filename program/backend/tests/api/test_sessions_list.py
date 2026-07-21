@@ -48,7 +48,30 @@ def test_list_sessions_sorted_newest_first(sessions_dir):
     sessions = resp.json()["sessions"]
     assert [s["title"] for s in sessions] == ["Newer", "Older"]
     assert sessions[0]["knowledge_source"] == "domain:_pytest/01-intro"
+    assert sessions[0]["status"] == "active"
+    assert sessions[0]["ended_at"] is None
     uuid.UUID(sessions[0]["session_id"])  # parseable id
+
+
+def test_list_and_transcript_expose_ended_early(sessions_dir):
+    session_id = _write_session(
+        sessions_dir, title="Cut short", created_at="2026-07-01T00:00:00+00:00"
+    )
+    path = sessions_dir / f"{session_id}.md"
+    state.write_session_status(
+        path,
+        status="ended_early",
+        ended_at="2026-07-01T01:00:00+00:00",
+    )
+
+    listed = client.get("/sessions").json()["sessions"]
+    assert listed[0]["session_id"] == session_id
+    assert listed[0]["status"] == "ended_early"
+    assert listed[0]["ended_at"] == "2026-07-01T01:00:00+00:00"
+
+    transcript = client.get(f"/sessions/{session_id}/transcript").json()
+    assert transcript["status"] == "ended_early"
+    assert transcript["ended_at"] == "2026-07-01T01:00:00+00:00"
 
 
 def test_list_sessions_skips_non_uuid_and_malformed(sessions_dir):
@@ -87,6 +110,8 @@ def test_get_transcript_returns_meta_and_body(sessions_dir):
     assert data["knowledge_source"] == "domain:_pytest/01-intro"
     assert data["focus_mode"] == "adaptive"
     assert data["max_questions"] == 10
+    assert data["status"] == "active"
+    assert data["ended_at"] is None
     assert "## Session" in data["body"]
     assert "## Question Log" in data["body"]
 

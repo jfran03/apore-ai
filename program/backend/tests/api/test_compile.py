@@ -95,6 +95,63 @@ def test_unsupported_source_rejected():
         files=[("files", ("clip.mp4", io.BytesIO(b"x"), "video/mp4"))],
     )
     assert resp.status_code == 400
+    assert "Unsupported" in resp.json()["detail"]
+
+
+def test_json_source_upload():
+    domain_id, chapter_id = _new_chapter()
+    base = _base(domain_id, chapter_id)
+    resp = client.post(
+        f"{base}/sources",
+        files=[
+            (
+                "files",
+                (
+                    "bank.json",
+                    io.BytesIO(b'{"topic":"sets","note":"A set is a collection."}'),
+                    "application/json",
+                ),
+            )
+        ],
+    )
+    assert resp.status_code == 200
+    listed = client.get(f"{base}/sources")
+    sources = listed.json()["sources"]
+    assert len(sources) == 1
+    assert sources[0]["normalize_status"] == "ok"
+
+
+def test_invalid_png_upload_returns_readable_400():
+    domain_id, chapter_id = _new_chapter()
+    base = _base(domain_id, chapter_id)
+    resp = client.post(
+        f"{base}/sources",
+        files=[("files", ("bad.png", io.BytesIO(b"not-png"), "image/png"))],
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "PNG" in detail or "valid" in detail
+
+
+def test_png_upload_records_failed_without_llm(monkeypatch):
+    from apore.config.llm import NoLLMConfigured
+
+    monkeypatch.setattr(
+        "apore.providers.vision_client.build_vision_client",
+        lambda: (_ for _ in ()).throw(NoLLMConfigured("none")),
+    )
+    domain_id, chapter_id = _new_chapter()
+    base = _base(domain_id, chapter_id)
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    resp = client.post(
+        f"{base}/sources",
+        files=[("files", ("venn.png", io.BytesIO(png), "image/png"))],
+    )
+    # Upload succeeds; normalization failure is recorded on the source entry.
+    assert resp.status_code == 200
+    listed = client.get(f"{base}/sources").json()["sources"]
+    assert listed[0]["normalize_status"] == "failed"
+    assert listed[0]["normalize_error"]
 
 
 def test_full_compile_approve_generate_flow():

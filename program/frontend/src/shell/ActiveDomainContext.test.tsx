@@ -4,10 +4,15 @@ import userEvent from '@testing-library/user-event';
 import type { KnowledgeCatalog, KnowledgeChapter } from '../api/types';
 
 const getKnowledgeCatalog = vi.fn();
+const listSessions = vi.fn();
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
-  return { ...actual, getKnowledgeCatalog: () => getKnowledgeCatalog() };
+  return {
+    ...actual,
+    getKnowledgeCatalog: () => getKnowledgeCatalog(),
+    listSessions: () => listSessions(),
+  };
 });
 
 import { ActiveDomainProvider, useActiveDomain } from './ActiveDomainContext';
@@ -42,14 +47,20 @@ function catalogFixture(): KnowledgeCatalog {
 }
 
 function Probe() {
-  const { activeDomainId, activeChapterId, setActiveDomainId, setActiveChapterId } =
-    useActiveDomain();
+  const {
+    activeDomainId,
+    activeChapterId,
+    setActiveDomainId,
+    setActiveChapterId,
+    selectDomainChapter,
+  } = useActiveDomain();
   return (
     <div>
       <span data-testid="domain">{activeDomainId ?? 'none'}</span>
       <span data-testid="chapter">{activeChapterId ?? 'none'}</span>
       <button onClick={() => setActiveDomainId('beta')}>switch-domain</button>
       <button onClick={() => setActiveChapterId('ch2')}>switch-chapter</button>
+      <button onClick={() => selectDomainChapter('beta', 'b1')}>select-cross</button>
     </div>
   );
 }
@@ -64,6 +75,7 @@ function renderProbe() {
 
 beforeEach(() => {
   getKnowledgeCatalog.mockReset();
+  listSessions.mockReset().mockResolvedValue({ sessions: [] });
   localStorage.clear();
 });
 
@@ -109,6 +121,17 @@ describe('ActiveDomainContext', () => {
     await userEvent.click(screen.getByText('switch-chapter'));
     expect(screen.getByTestId('chapter')).toHaveTextContent('ch2');
     expect(getStoredKnowledgeSource()).toBe('domain:alpha/ch2');
+  });
+
+  it('selectDomainChapter updates domain and chapter atomically and persists', async () => {
+    getKnowledgeCatalog.mockResolvedValue(catalogFixture());
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId('domain')).toHaveTextContent('alpha'));
+
+    await userEvent.click(screen.getByText('select-cross'));
+    expect(screen.getByTestId('domain')).toHaveTextContent('beta');
+    expect(screen.getByTestId('chapter')).toHaveTextContent('b1');
+    expect(getStoredKnowledgeSource()).toBe('domain:beta/b1');
   });
 
   it('handles an empty catalog without crashing and retains the stored selection', async () => {

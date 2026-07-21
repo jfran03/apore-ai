@@ -27,6 +27,9 @@ _LEGACY_TEMPLATE = """\
 """
 
 
+SESSION_STATUSES = ("active", "completed", "ended_early")
+
+
 def _session_template(
     *,
     title: str,
@@ -35,7 +38,11 @@ def _session_template(
     knowledge_source: str,
     focus_mode: str,
     max_questions: int,
+    concept_ids: list[str] | None = None,
+    status: str = "active",
+    ended_at: str = "",
 ) -> str:
+    concepts_line = ",".join(concept_ids or [])
     return (
         f"# {title}\n\n"
         f"## Session\n"
@@ -43,7 +50,10 @@ def _session_template(
         f"created_at: {created_at}\n"
         f"knowledge_source: {knowledge_source}\n"
         f"focus_mode: {focus_mode}\n"
-        f"max_questions: {max_questions}\n\n"
+        f"max_questions: {max_questions}\n"
+        f"concept_ids: {concepts_line}\n"
+        f"status: {status}\n"
+        f"ended_at: {ended_at}\n\n"
         f"## Scalar\n"
         f"0.5\n\n"
         f"## Mastery\n\n"
@@ -79,6 +89,7 @@ def initialize(
     knowledge_source: str | None = None,
     focus_mode: str | None = None,
     max_questions: int | None = None,
+    concept_ids: list[str] | None = None,
 ) -> None:
     """Create a fresh learner-state.md with default values."""
     if session_id and created_at and knowledge_source and focus_mode is not None and max_questions is not None:
@@ -91,10 +102,18 @@ def initialize(
                 knowledge_source=knowledge_source,
                 focus_mode=focus_mode,
                 max_questions=max_questions,
+                concept_ids=concept_ids,
             ),
         )
         return
     _write_text(path, _LEGACY_TEMPLATE)
+
+
+def parse_concept_ids(raw: str | None) -> list[str]:
+    """Parse comma-separated concept ids from session metadata."""
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split(",") if part.strip()]
 
 
 def read_title(path: Path) -> str:
@@ -104,6 +123,21 @@ def read_title(path: Path) -> str:
     if first.startswith("# "):
         return first[2:].strip()
     return "Study Session"
+
+
+def write_title(path: Path, title: str) -> None:
+    """Replace the leading H1 title in-place."""
+    cleaned = (title or "").strip() or "Study Session"
+    if "\n" in cleaned:
+        cleaned = cleaned.splitlines()[0].strip() or "Study Session"
+    text = _read_text(path)
+    lines = text.splitlines(keepends=True)
+    if lines and lines[0].lstrip().startswith("# "):
+        newline = "\n" if lines[0].endswith("\n") else ""
+        lines[0] = f"# {cleaned}{newline}"
+        _write_text(path, "".join(lines))
+        return
+    _write_text(path, f"# {cleaned}\n\n{text}")
 
 
 def read_session_meta(path: Path) -> dict[str, str]:
@@ -118,7 +152,72 @@ def read_session_meta(path: Path) -> dict[str, str]:
         if ":" in line:
             key, _, val = line.partition(":")
             result[key.strip()] = val.strip()
+    # Legacy files created before lifecycle fields: treat as still active.
+    if "status" not in result or result["status"] not in SESSION_STATUSES:
+        result["status"] = "active"
+    if "ended_at" not in result:
+        result["ended_at"] = ""
     return result
+
+
+def write_session_status(
+    path: Path,
+    *,
+    status: str,
+    ended_at: str | None = None,
+) -> None:
+    """Set `status` (and optional `ended_at`) under `## Session`.
+
+    Creates missing keys for legacy session files that lack lifecycle fields.
+    """
+    if status not in SESSION_STATUSES:
+        raise ValueError(f"status must be one of {SESSION_STATUSES}, got {status!r}")
+    text = _read_text(path)
+    m = re.search(r"## Session\s*\n(.*?)(?=\n## [^\n]+\n|\Z)", text, re.DOTALL)
+    if not m:
+        raise ValueError("Session section not found in learner-state.md")
+    block = m.group(1)
+
+    def _set_key(src: str, key: str, value: str) -> str:
+        # Use [ \t]* (not \s*) so we do not consume the line ending.
+        pattern = re.compile(rf"(?m)^({re.escape(key)}:[ \t]*)(.*)$")
+        if pattern.search(src):
+            return pattern.sub(lambda mm: mm.group(1) + value, src, count=1)
+        trimmed = src.rstrip("\n")
+        suffix = "\n" if src.endswith("\n") else ""
+        return f"{trimmed}\n{key}: {value}\n{suffix}"
+
+    updated_block = _set_key(block, "status", status)
+    if ended_at is not None:
+        updated_block = _set_key(updated_block, "ended_at", ended_at)
+    updated = text[: m.start(1)] + updated_block + text[m.end(1) :]
+    _write_text(path, updated)
+
+
+def rewrite_knowledge_source(path: Path, old: str, new: str) -> bool:
+    """Replace `knowledge_source` under `## Session` when it exactly matches `old`.
+
+    Returns True when the file was updated.
+    """
+    if old == new:
+        return False
+    text = _read_text(path)
+    m = re.search(r"## Session\s*\n(.*?)(?=\n## [^\n]+\n|\Z)", text, re.DOTALL)
+    if not m:
+        return False
+    block = m.group(1)
+    pattern = re.compile(r"(?m)^(knowledge_source:\s*)(.*)$")
+    match = pattern.search(block)
+    if not match or match.group(2).strip() != old:
+        return False
+    updated_block = pattern.sub(
+        lambda mm: mm.group(1) + new if mm.group(2).strip() == old else mm.group(0),
+        block,
+        count=1,
+    )
+    updated = text[: m.start(1)] + updated_block + text[m.end(1) :]
+    _write_text(path, updated)
+    return True
 
 
 def read_scalar(path: Path) -> float:

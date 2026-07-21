@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -19,8 +21,11 @@ from apore.api.schemas import (
     ConceptOrderRequest,
     CreateChapterRequest,
     CreateDomainRequest,
+    RenameChapterRequest,
+    RenameDomainRequest,
     CreateSessionRequest,
     CreateSessionResponse,
+    EndSessionResponse,
     FixtureFetchResponse,
     KnowledgeCatalogResponse,
     ProviderConfigResponse,
@@ -67,12 +72,23 @@ from apore.runtime.core import (
     tutor_turn,
 )
 from apore.runtime.intent import is_help_request
-from apore.runtime.question_bank import QuestionBankExhaustedError
-from apore.runtime.session_meta import generate_session_title
+from apore.runtime.question_bank import (
+    QuestionBank,
+    QuestionBankExhaustedError,
+    load_question_bank,
+)
+from apore.runtime.session_meta import fallback_session_title, generate_session_title
 from apore.setup.catalog import list_knowledge
 from apore.setup.fixtures import fetch_fixture
 from apore.setup.paths import chapter_dir, validate_id
-from apore.setup.scaffold import scaffold_chapter, scaffold_domain
+from apore.setup.scaffold import (
+    delete_chapter,
+    delete_domain,
+    rename_chapter,
+    rename_domain,
+    scaffold_chapter,
+    scaffold_domain,
+)
 from apore.setup.question_bank import (
     BankQuestion,
     add_question,
@@ -93,12 +109,12 @@ from apore.setup.compile_jobs import (
     start_compile,
 )
 from apore.setup.stub_compile import stub_compile_chapter
-from apore.runtime.question_bank import QuestionBank
 from apore.sim.runner import run_sessions as sim_run_sessions
 from apore.sim.student import StudentProfile
 
 PROGRAM_ROOT = Path(__file__).resolve().parent.parent.parent
 SESSIONS_DIR = PROGRAM_ROOT / "sessions"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -134,6 +150,10 @@ class SessionState:
     created_at: str
     focus_mode: str = "adaptive"
     max_questions: int = 10
+    concept_ids: list[str] = field(default_factory=list)
+    title_pending: bool = False
+    status: str = "active"
+    ended_at: str | None = None
     pending_question: GeneratedQuestion | None = None
     pending_grading: PendingGrading | None = None
     reflection: ReflectionState | None = None
@@ -174,6 +194,74 @@ def _normalize_focus_mode(body: CreateSessionRequest) -> str:
     return mode
 
 
+def _resolve_session_concept_ids(
+    chapter: ChapterContext,
+    requested: list[str] | None,
+) -> list[str]:
+    """Validate and order concept ids for a session; default to all with bank questions."""
+    graph = load_concept_graph(chapter)
+    if not graph.nodes:
+        raise HTTPException(
+            status_code=400,
+            detail="Chapter has no compiled concept graph",
+        )
+    bank = load_question_bank(chapter)
+    if bank is None or not bank.questions:
+        raise HTTPException(
+            status_code=400,
+            detail="Chapter has no question bank; generate one before starting a session",
+        )
+    banked = {q.concept_id for q in bank.questions}
+    available = [cid for cid in graph.ordered_ids() if cid in banked]
+    if not available:
+        raise HTTPException(
+            status_code=400,
+            detail="No concepts in the compiled wiki have bank questions",
+        )
+
+    if requested is None:
+        return available
+
+    if not requested:
+        raise HTTPException(
+            status_code=400,
+            detail="concept_ids must include at least one concept",
+        )
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    unknown: list[str] = []
+    no_questions: list[str] = []
+    for cid in requested:
+        if cid in seen:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Duplicate concept_id: {cid!r}",
+            )
+        seen.add(cid)
+        if cid not in graph.nodes:
+            unknown.append(cid)
+            continue
+        if cid not in banked:
+            no_questions.append(cid)
+            continue
+        ordered.append(cid)
+
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown concept_ids: {', '.join(unknown)}",
+        )
+    if no_questions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Concepts with no bank questions: {', '.join(no_questions)}",
+        )
+    # Preserve teaching order from the compiled graph.
+    available_set = set(ordered)
+    return [cid for cid in graph.ordered_ids() if cid in available_set]
+
+
 def _session_state_response(sess: SessionState) -> SessionStateResponse:
     remaining = max(0, sess.max_questions - sess.question_count)
     return SessionStateResponse(
@@ -187,7 +275,126 @@ def _session_state_response(sess: SessionState) -> SessionStateResponse:
         max_questions=sess.max_questions,
         questions_remaining=remaining,
         active_concept_id=sess.active_concept_id,
+        concept_ids=list(sess.concept_ids),
+        title_pending=sess.title_pending,
+        status=sess.status,  # type: ignore[arg-type]
+        ended_at=sess.ended_at,
     )
+
+
+def _session_status_from_meta(meta: dict[str, str]) -> tuple[str, str | None]:
+    status = meta.get("status") or "active"
+    if status not in ("active", "completed", "ended_early"):
+        status = "active"
+    ended_raw = (meta.get("ended_at") or "").strip()
+    return status, ended_raw or None
+
+
+def _clear_in_flight_question(sess: SessionState) -> None:
+    """Drop unfinished question state without writing a question-log row.
+
+    Rated questions already persist via finalize_turn; only roll back the
+    in-memory count when the current question was never rated.
+    """
+    unfinished = sess.pending_question is not None or sess.pending_grading is not None
+    if unfinished and sess.question_count > 0:
+        sess.question_count -= 1
+    sess.pending_question = None
+    sess.pending_grading = None
+    sess.reflection = None
+    sess.active_transcript = []
+    sess.awaiting_skip_reason = False
+    sess.tutor_mode = False
+    sess.active_concept_id = None
+
+
+def _mark_session_ended(
+    sess: SessionState,
+    *,
+    status: str,
+    ended_at: str | None = None,
+) -> str:
+    """Persist lifecycle status and clear in-flight question state."""
+    stamp = ended_at or datetime.now(timezone.utc).isoformat()
+    state.write_session_status(sess.state_path, status=status, ended_at=stamp)
+    sess.status = status
+    sess.ended_at = stamp
+    _clear_in_flight_question(sess)
+    return stamp
+
+
+def _require_active_session(sess: SessionState) -> None:
+    if sess.status != "active":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session is {sess.status}; start a new session to continue",
+        )
+
+
+def _run_session_title_job(
+    session_id: str,
+    *,
+    chapter: ChapterContext,
+    knowledge_source: str,
+    focus_mode: str,
+    max_questions: int,
+    concept_ids: list[str],
+    state_path: Path,
+    provider_name: str,
+    model: str,
+) -> None:
+    """Generate an LLM title in the background and update session state + markdown."""
+    try:
+        provider = get_provider(provider_name)
+        title = generate_session_title(
+            chapter=chapter,
+            knowledge_source=knowledge_source,
+            focus_mode=focus_mode,  # type: ignore[arg-type]
+            max_questions=max_questions,
+            provider=provider,
+            model=model,
+            program_root=PROGRAM_ROOT,
+            concept_ids=concept_ids,
+        )
+        sess = sessions.get(session_id)
+        if sess is None:
+            return
+        sess.title = title
+        state.write_title(state_path, title)
+    except Exception:
+        logger.exception("Background session title job failed for %s", session_id)
+    finally:
+        sess = sessions.get(session_id)
+        if sess is not None:
+            sess.title_pending = False
+
+
+def _start_session_title_job(sess: SessionState) -> bool:
+    """Spawn a daemon title job when a provider is configured. Returns whether pending."""
+    provider_name = get_active_provider()
+    if provider_name is None:
+        sess.title_pending = False
+        return False
+    model = get_active_model() or "stub-model"
+    sess.title_pending = True
+    thread = threading.Thread(
+        target=_run_session_title_job,
+        kwargs={
+            "session_id": sess.session_id,
+            "chapter": sess.chapter,
+            "knowledge_source": sess.knowledge_source,
+            "focus_mode": sess.focus_mode,
+            "max_questions": sess.max_questions,
+            "concept_ids": list(sess.concept_ids),
+            "state_path": sess.state_path,
+            "provider_name": provider_name,
+            "model": model,
+        },
+        daemon=True,
+        name=f"session-title-{sess.session_id[:8]}",
+    )
+    thread.start()
+    return True
 
 
 def _upstream_commit_for_knowledge_source(knowledge_source: str) -> str:
@@ -211,6 +418,93 @@ def _get_session(session_id: str) -> SessionState:
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
     return sessions[session_id]
+
+
+def _domain_knowledge_prefix(domain_id: str) -> str:
+    return f"domain:{domain_id}/"
+
+
+def _rewrite_domain_knowledge_source(knowledge_source: str, old_domain_id: str, new_domain_id: str) -> str | None:
+    prefix = _domain_knowledge_prefix(old_domain_id)
+    if not knowledge_source.startswith(prefix):
+        return None
+    chapter_id = knowledge_source[len(prefix) :]
+    if not chapter_id or "/" in chapter_id:
+        return None
+    return f"domain:{new_domain_id}/{chapter_id}"
+
+
+def _migrate_sessions_for_domain_rename(old_domain_id: str, new_domain_id: str) -> int:
+    """Rewrite persisted and in-memory session knowledge sources after a domain rename."""
+    if old_domain_id == new_domain_id:
+        return 0
+
+    updated = 0
+    if SESSIONS_DIR.is_dir():
+        for path in SESSIONS_DIR.glob("*.md"):
+            try:
+                uuid.UUID(path.stem)
+            except ValueError:
+                continue
+            try:
+                meta = state.read_session_meta(path)
+            except OSError:
+                continue
+            old_source = meta.get("knowledge_source")
+            if not old_source:
+                continue
+            new_source = _rewrite_domain_knowledge_source(old_source, old_domain_id, new_domain_id)
+            if new_source is None:
+                continue
+            if state.rewrite_knowledge_source(path, old_source, new_source):
+                updated += 1
+
+    for sess in list(sessions.values()):
+        new_source = _rewrite_domain_knowledge_source(
+            sess.knowledge_source, old_domain_id, new_domain_id
+        )
+        if new_source is None:
+            continue
+        try:
+            chapter = resolve_chapter(new_source, PROGRAM_ROOT)
+        except FileNotFoundError:
+            continue
+        sess.knowledge_source = new_source
+        sess.chapter = chapter
+
+    return updated
+
+
+def _delete_sessions_for_domain(domain_id: str) -> int:
+    """Delete persisted and in-memory sessions that belong to a domain."""
+    prefix = _domain_knowledge_prefix(domain_id)
+    deleted = 0
+
+    if SESSIONS_DIR.is_dir():
+        for path in list(SESSIONS_DIR.glob("*.md")):
+            try:
+                uuid.UUID(path.stem)
+            except ValueError:
+                continue
+            try:
+                meta = state.read_session_meta(path)
+            except OSError:
+                continue
+            knowledge_source = meta.get("knowledge_source", "")
+            if not knowledge_source.startswith(prefix):
+                continue
+            try:
+                path.unlink()
+            except OSError:
+                continue
+            deleted += 1
+            sessions.pop(path.stem, None)
+
+    for session_id, sess in list(sessions.items()):
+        if sess.knowledge_source.startswith(prefix):
+            sessions.pop(session_id, None)
+
+    return deleted
 
 
 def _require_provider():
@@ -418,6 +712,8 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    concept_ids = _resolve_session_concept_ids(chapter, body.concept_ids)
+
     session_id = str(uuid.uuid4())
     state_path = SESSIONS_DIR / f"{session_id}.md"
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -425,17 +721,9 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
     fixture_commit = _upstream_commit_for_knowledge_source(knowledge_source)
     now = datetime.now(timezone.utc).isoformat()
 
-    provider_name = get_active_provider()
-    provider = get_provider(provider_name) if provider_name else None
-    model = get_active_model() or "stub-model"
-    title = generate_session_title(
-        chapter=chapter,
+    title = fallback_session_title(
         knowledge_source=knowledge_source,
         focus_mode=focus_mode,  # type: ignore[arg-type]
-        max_questions=body.max_questions,
-        provider=provider,
-        model=model,
-        program_root=PROGRAM_ROOT,
     )
 
     state.initialize(
@@ -446,9 +734,10 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
         knowledge_source=knowledge_source,
         focus_mode=focus_mode,
         max_questions=body.max_questions,
+        concept_ids=concept_ids,
     )
 
-    sessions[session_id] = SessionState(
+    sess = SessionState(
         session_id=session_id,
         title=title,
         knowledge_source=knowledge_source,
@@ -459,9 +748,12 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
         created_at=now,
         focus_mode=focus_mode,
         max_questions=body.max_questions,
+        concept_ids=concept_ids,
         asked_question_ids=state.read_asked_ids(state_path),
         metadata={"fixture_commit": fixture_commit},
     )
+    sessions[session_id] = sess
+    title_pending = _start_session_title_job(sess)
     return CreateSessionResponse(
         session_id=session_id,
         title=title,
@@ -470,12 +762,15 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
         knowledge_source=knowledge_source,
         focus_mode=focus_mode,
         max_questions=body.max_questions,
+        concept_ids=concept_ids,
+        title_pending=title_pending,
     )
 
 
 @app.post("/sessions/{session_id}/question", response_model=QuestionResponse)
 def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
     sess = _get_session(session_id)
+    _require_active_session(sess)
     if sess.pending_question is not None:
         raise HTTPException(
             status_code=409,
@@ -497,17 +792,28 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
             detail="Session question limit reached",
         )
 
-    provider_name = get_active_provider()
-    if provider_name is None:
+    bank = load_question_bank(sess.chapter)
+    has_bank = bank is not None and bool(bank.questions)
+    if not has_bank:
         raise HTTPException(
-            status_code=503,
-            detail="No LLM provider configured. Set API keys via PUT /config/provider",
+            status_code=400,
+            detail="Chapter has no question bank; generate one before starting a session",
         )
 
-    provider = get_provider(provider_name)
+    # Bank selection is local; provider is only needed for LLM dialogue/grading later.
+    provider_name = get_active_provider()
+    provider = get_provider(provider_name) if provider_name else None
     model = get_active_model() or "claude-sonnet-4-20250514"
+    if provider is None:
+        # Stub provider object is not required for bank path; use a no-op only if needed.
+        from apore.providers.stub import StubProvider
+
+        provider = StubProvider()
+        model = "stub-model"
+
     question_number = sess.question_count + 1
     metadata = _build_metadata(sess)
+    allowed = set(sess.concept_ids) if sess.concept_ids else None
 
     try:
         generated = generate_question(
@@ -524,6 +830,7 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
             asked_ids=sess.asked_question_ids,
             focus_mode=sess.focus_mode,
             last_concept_id=sess.active_concept_id,
+            allowed_concept_ids=allowed,
         )
     except QuestionBankExhaustedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -554,6 +861,7 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
 @app.post("/sessions/{session_id}/turn", response_model=TurnResponse)
 def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
     sess = _get_session(session_id)
+    _require_active_session(sess)
 
     learner_message = (body.learner_message or body.learner_response or "").strip()
     skip_reason = (body.skip_reason or "").strip()
@@ -587,11 +895,11 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
         grading = reflection.grading
         sess.reflection = None
         sess.tutor_mode = False
-        phase = (
-            "session_complete"
-            if grading.question_number >= sess.max_questions
-            else "completed"
-        )
+        if grading.question_number >= sess.max_questions:
+            _mark_session_ended(sess, status="completed")
+            phase = "session_complete"
+        else:
+            phase = "completed"
         return _turn_response_from_grading(
             phase=phase,
             grading=grading,
@@ -766,6 +1074,40 @@ def get_session_state(session_id: str) -> SessionStateResponse:
     return _session_state_response(sess)
 
 
+@app.post("/sessions/{session_id}/end", response_model=EndSessionResponse)
+def end_session(session_id: str) -> EndSessionResponse:
+    """End an active session early; keep completed questions, drop unfinished ones."""
+    sess = _get_session(session_id)
+    if sess.status == "ended_early" and sess.ended_at:
+        # Idempotent: ending again returns the same terminal state.
+        return EndSessionResponse(
+            session_id=sess.session_id,
+            status="ended_early",
+            ended_at=sess.ended_at,
+            title=sess.title,
+            knowledge_source=sess.knowledge_source,
+            question_count=sess.question_count,
+            max_questions=sess.max_questions,
+            scalar=state.read_scalar(sess.state_path),
+        )
+    if sess.status != "active":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session is already {sess.status}",
+        )
+    ended_at = _mark_session_ended(sess, status="ended_early")
+    return EndSessionResponse(
+        session_id=sess.session_id,
+        status="ended_early",
+        ended_at=ended_at,
+        title=sess.title,
+        knowledge_source=sess.knowledge_source,
+        question_count=sess.question_count,
+        max_questions=sess.max_questions,
+        scalar=state.read_scalar(sess.state_path),
+    )
+
+
 @app.get("/sessions", response_model=SessionListResponse)
 def list_sessions() -> SessionListResponse:
     """Summaries of persisted sessions, newest first (spec: sidebar histories)."""
@@ -783,12 +1125,15 @@ def list_sessions() -> SessionListResponse:
                 continue
             if not all(k in meta for k in ("id", "created_at", "knowledge_source")):
                 continue
+            status, ended_at = _session_status_from_meta(meta)
             summaries.append(
                 SessionSummary(
                     session_id=meta["id"],
                     title=title,
                     created_at=meta["created_at"],
                     knowledge_source=meta["knowledge_source"],
+                    status=status,  # type: ignore[arg-type]
+                    ended_at=ended_at,
                 )
             )
     summaries.sort(key=lambda s: s.created_at, reverse=True)
@@ -810,6 +1155,7 @@ def get_session_transcript(session_id: str) -> SessionTranscriptResponse:
         max_questions = int(meta.get("max_questions", "0"))
     except ValueError:
         max_questions = 0
+    status, ended_at = _session_status_from_meta(meta)
     return SessionTranscriptResponse(
         session_id=session_id,
         title=state.read_title(path),
@@ -817,6 +1163,8 @@ def get_session_transcript(session_id: str) -> SessionTranscriptResponse:
         knowledge_source=meta.get("knowledge_source", ""),
         focus_mode=meta.get("focus_mode", "adaptive"),
         max_questions=max_questions,
+        status=status,  # type: ignore[arg-type]
+        ended_at=ended_at,
         body=path.read_text(encoding="utf-8"),
     )
 
@@ -831,7 +1179,14 @@ def get_setup_knowledge() -> KnowledgeCatalogResponse:
 def post_setup_domain(body: CreateDomainRequest) -> dict:
     try:
         validate_id(body.domain_id, "domain_id")
-        path = scaffold_domain(PROGRAM_ROOT, body.domain_id)
+        path = scaffold_domain(
+            PROGRAM_ROOT,
+            body.domain_id,
+            name=body.name,
+            scope=body.scope,
+            goal=body.goal,
+            tutor_style=body.tutor_style,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileExistsError as exc:
@@ -839,6 +1194,41 @@ def post_setup_domain(body: CreateDomainRequest) -> dict:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"domain_id": body.domain_id, "path": str(path)}
+
+
+@app.patch("/setup/domains/{domain_id}")
+def patch_setup_domain(domain_id: str, body: RenameDomainRequest) -> dict:
+    try:
+        path = rename_domain(PROGRAM_ROOT, domain_id, body.domain_id)
+        sessions_updated = _migrate_sessions_for_domain_rename(domain_id, body.domain_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "domain_id": body.domain_id,
+        "path": str(path),
+        "sessions_updated": sessions_updated,
+    }
+
+
+@app.delete("/setup/domains/{domain_id}")
+def delete_setup_domain(domain_id: str) -> dict:
+    try:
+        validate_id(domain_id, "domain_id")
+        sessions_deleted = _delete_sessions_for_domain(domain_id)
+        delete_domain(PROGRAM_ROOT, domain_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "domain_id": domain_id,
+        "deleted": True,
+        "sessions_deleted": sessions_deleted,
+    }
 
 
 @app.post("/setup/domains/{domain_id}/chapters")
@@ -857,6 +1247,35 @@ def post_setup_chapter(domain_id: str, body: CreateChapterRequest) -> dict:
         "knowledge_source": f"domain:{domain_id}/{body.chapter_id}",
         "path": str(path),
     }
+
+
+@app.patch("/setup/domains/{domain_id}/chapters/{chapter_id}")
+def patch_setup_chapter(domain_id: str, chapter_id: str, body: RenameChapterRequest) -> dict:
+    try:
+        path = rename_chapter(PROGRAM_ROOT, domain_id, chapter_id, body.chapter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "domain_id": domain_id,
+        "chapter_id": body.chapter_id,
+        "knowledge_source": f"domain:{domain_id}/{body.chapter_id}",
+        "path": str(path),
+    }
+
+
+@app.delete("/setup/domains/{domain_id}/chapters/{chapter_id}")
+def delete_setup_chapter(domain_id: str, chapter_id: str) -> dict:
+    try:
+        delete_chapter(PROGRAM_ROOT, domain_id, chapter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"domain_id": domain_id, "chapter_id": chapter_id, "deleted": True}
 
 
 def _chapter_root_or_404(domain_id: str, chapter_id: str) -> Path:

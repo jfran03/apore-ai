@@ -75,6 +75,7 @@
   border-radius: 6px;
   font-size: 0.9375rem;
   background: var(--color-canvas-soft);
+  color: var(--color-ink);
 }
 
 .setup-checklist {
@@ -124,6 +125,7 @@
 /* ------------------------------------------------------------------ */
 
 .setup-page--workbench {
+  width: 100%;
   max-width: 1100px;
   display: flex;
   flex-direction: column;
@@ -204,12 +206,47 @@
   gap: 2px;
 }
 
+.wb-rail__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.wb-rail__row--editing {
+  flex-direction: column;
+  align-items: stretch;
+  padding: var(--spacing-xs);
+  background: var(--color-canvas-soft);
+}
+
+.wb-rail__rename {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.wb-rail__rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-xs);
+}
+
+.wb-rail__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  padding-right: 2px;
+}
+
 .wb-rail__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-xs);
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   min-height: 44px;
   padding: var(--spacing-xs) var(--spacing-sm);
   border: none;
@@ -290,9 +327,15 @@
 .wb-tabpanel {
   flex: 1;
   min-height: 0;
+  overflow: hidden; /* clip tab tween; no scrollbar flash on this node */
+  padding-right: var(--spacing-xxs);
+}
+
+.wb-tabpanel > * {
+  height: 100%;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding-right: var(--spacing-xxs);
 }
 
 .wb-tabs {
@@ -501,10 +544,28 @@
   margin-top: var(--spacing-xs);
 }
 
+.btn--danger {
+  background-color: var(--color-semantic-error);
+  color: var(--color-on-primary);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-semantic-error) 88%, #000);
+}
+
+.btn--danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wb-modal {
     backdrop-filter: none;
   }
+}
+
+[data-theme='dark'] .wb-modal {
+  background-color: rgba(0, 0, 0, 0.6);
 }
 
 /* Source list */
@@ -584,6 +645,39 @@
 
 .wb-source__delete {
   flex-shrink: 0;
+}
+
+.wb-source__pending-slot {
+  flex-shrink: 0;
+  width: 4.5rem;
+}
+
+.wb-source__spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-top: 0.2rem;
+  border: 2px solid var(--color-hairline-strong);
+  border-top-color: var(--color-ink);
+  border-radius: 50%;
+  animation: wb-spin 0.7s linear infinite;
+  vertical-align: top;
+}
+
+@keyframes wb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-source__spinner {
+    animation: none;
+    border-top-color: var(--color-hairline-strong);
+    background: var(--color-hairline-strong);
+    border-width: 0;
+    opacity: 0.55;
+  }
 }
 
 /* Progress + banners */
@@ -1098,7 +1192,8 @@
 .wb-input:focus-visible,
 .wb-source__delete:focus-visible,
 .wb-icon-btn:focus-visible,
-.wb-rail__add:focus-visible {
+.wb-rail__add:focus-visible,
+.btn--danger:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
@@ -1125,10 +1220,19 @@
     padding-right: 0;
   }
 
+  .wb-tabpanel > * {
+    height: auto;
+    overflow: visible;
+  }
+
   .wb-rail__list {
     flex-direction: row;
     overflow-x: auto;
     padding-bottom: var(--spacing-xxs);
+  }
+
+  .wb-rail__row {
+    flex-shrink: 0;
   }
 
   .wb-rail__item {

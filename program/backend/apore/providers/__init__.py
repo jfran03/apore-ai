@@ -3,6 +3,11 @@ from apore.providers.base import Provider
 from apore.providers.nim_adapter import NIMProvider
 from apore.providers.stub import StubProvider
 from apore.providers.throttle import Throttle
+from apore.providers.vision_client import (
+    AnthropicVisionClient,
+    VisionClientError,
+    build_vision_client,
+)
 
 
 def get_provider(provider_name: str, *, api_key: str | None = None) -> Provider:
@@ -16,4 +21,13 @@ def get_provider(provider_name: str, *, api_key: str | None = None) -> Provider:
         raise ValueError(f"Unknown provider: {provider_name!r}")
 
 
-__all__ = ["Provider", "Throttle", "AnthropicProvider", "NIMProvider", "get_provider"]
+__all__ = [
+    "Provider",
+    "Throttle",
+    "AnthropicProvider",
+    "NIMProvider",
+    "AnthropicVisionClient",
+    "VisionClientError",
+    "build_vision_client",
+    "get_provider",
+]

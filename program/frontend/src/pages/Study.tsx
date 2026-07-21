@@ -1,13 +1,18 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   createSession,
   fetchQuestion,
   postTurn,
   getSessionState,
+  endSession,
   setStoredKnowledgeSource,
+  getWikiPreview,
+  getQuestionBank,
 } from '../api/client';
 import type { QuestionResponse, TurnResponse } from '../api/types';
 import { useActiveDomain } from '../shell/ActiveDomainContext';
+import { useStudyFocus } from '../shell/StudyFocusContext';
 import { QuestionCard } from '../components/QuestionCard';
 import { QuestionHistoryCard, type HistoryRecord } from '../components/QuestionHistoryCard';
 import {
@@ -22,6 +27,13 @@ import '../styles/study.css';
 
 type FocusMode = 'adaptive' | 'weak_points';
 type PreambleStep = 'mode' | 'chat-config';
+
+interface ConceptOption {
+  concept_id: string;
+  label: string;
+  order: number;
+  question_count: number;
+}
 
 interface CurrentQuestion {
   question_number: number;
@@ -106,15 +118,24 @@ function gradeFromTurn(res: TurnResponse): GradeResult {
 }
 
 export function Study() {
-  const { activeDomain, activeChapter, activeChapterId, setActiveChapterId, catalogError } =
+  const navigate = useNavigate();
+  const { activeDomain, activeChapter, activeChapterId, setActiveChapterId, catalogError, refreshSessions } =
     useActiveDomain();
+  const { setFocused, setOnExitRequest } = useStudyFocus();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('adaptive');
   const [sessionLength, setSessionLength] = useState(10);
   const [preambleStep, setPreambleStep] = useState<PreambleStep>('mode');
+  const [conceptOptions, setConceptOptions] = useState<ConceptOption[]>([]);
+  const [selectedConceptIds, setSelectedConceptIds] = useState<string[]>([]);
+  const [conceptsLoading, setConceptsLoading] = useState(false);
+  const [conceptsError, setConceptsError] = useState<string | null>(null);
 
   const [session, setSession] = useState<SessionState | null>(null);
   const [sessionComplete, setSessionComplete] = useState<SessionCompleteSummary | null>(null);
+  const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+  const [exitLoading, setExitLoading] = useState(false);
+  const [exitError, setExitError] = useState<string | null>(null);
   const [startLoading, setStartLoading] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [questionLoading, setQuestionLoading] = useState(false);
@@ -122,10 +143,139 @@ export function Study() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const pendingAfterReveal = useRef<(() => void) | null>(null);
+  const titlePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const exitContinueRef = useRef<HTMLButtonElement>(null);
 
   const selectedChapter = activeChapter;
+  const selectableConceptIds = useMemo(
+    () => conceptOptions.filter((c) => c.question_count > 0).map((c) => c.concept_id),
+    [conceptOptions],
+  );
   const canStart =
-    selectedChapter != null && chapterStudyReady(selectedChapter) && sessionLength >= 1 && sessionLength <= 50;
+    selectedChapter != null &&
+    chapterStudyReady(selectedChapter) &&
+    sessionLength >= 1 &&
+    sessionLength <= 50 &&
+    selectedConceptIds.length >= 1 &&
+    !conceptsLoading &&
+    !conceptsError;
+
+  useEffect(() => {
+    if (!selectedChapter || !chapterStudyReady(selectedChapter)) {
+      setConceptOptions([]);
+      setSelectedConceptIds([]);
+      setConceptsError(null);
+      setConceptsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const source = selectedChapter.knowledge_source;
+
+    async function loadConcepts() {
+      setConceptsLoading(true);
+      setConceptsError(null);
+      try {
+        const [wiki, bank] = await Promise.all([
+          getWikiPreview('published', source),
+          getQuestionBank(source),
+        ]);
+        if (cancelled) return;
+
+        const counts = new Map<string, number>();
+        for (const q of bank.questions) {
+          counts.set(q.concept_id, (counts.get(q.concept_id) ?? 0) + 1);
+        }
+
+        const options: ConceptOption[] = [...wiki.pages]
+          .sort((a, b) => a.order - b.order || a.concept_id.localeCompare(b.concept_id))
+          .map((page) => ({
+            concept_id: page.concept_id,
+            label: page.label,
+            order: page.order,
+            question_count: counts.get(page.concept_id) ?? 0,
+          }));
+
+        setConceptOptions(options);
+        setSelectedConceptIds(
+          options.filter((c) => c.question_count > 0).map((c) => c.concept_id),
+        );
+      } catch (err) {
+        if (cancelled) return;
+        setConceptOptions([]);
+        setSelectedConceptIds([]);
+        setConceptsError(err instanceof Error ? err.message : 'Failed to load concepts');
+      } finally {
+        if (!cancelled) setConceptsLoading(false);
+      }
+    }
+
+    void loadConcepts();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedChapter]);
+
+  const toggleConcept = useCallback((conceptId: string) => {
+    setSelectedConceptIds((prev) => {
+      if (prev.includes(conceptId)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((id) => id !== conceptId);
+      }
+      return [...prev, conceptId];
+    });
+  }, []);
+
+  const selectAllConcepts = useCallback(() => {
+    setSelectedConceptIds(selectableConceptIds);
+  }, [selectableConceptIds]);
+
+  const stopTitlePoll = useCallback(() => {
+    if (titlePollRef.current != null) {
+      clearInterval(titlePollRef.current);
+      titlePollRef.current = null;
+    }
+  }, []);
+
+  const startTitlePoll = useCallback(
+    (sessionId: string) => {
+      stopTitlePoll();
+      const startedAt = Date.now();
+      const maxMs = 45_000;
+
+      const tick = async () => {
+        if (Date.now() - startedAt > maxMs) {
+          stopTitlePoll();
+          return;
+        }
+        try {
+          const state = await getSessionState(sessionId);
+          setSession((prev) => {
+            if (!prev || prev.sessionId !== sessionId) return prev;
+            if (prev.title === state.title) return prev;
+            return { ...prev, title: state.title };
+          });
+          if (!state.title_pending) {
+            stopTitlePoll();
+          }
+        } catch {
+          // Ignore transient poll errors; keep trying until timeout.
+        }
+      };
+
+      titlePollRef.current = setInterval(() => {
+        void tick();
+      }, 1500);
+      void tick();
+    },
+    [stopTitlePoll],
+  );
+
+  useEffect(() => {
+    return () => {
+      stopTitlePoll();
+    };
+  }, [stopTitlePoll]);
 
   const loadNextQuestion = useCallback(async (sessionId: string) => {
     setQuestionLoading(true);
@@ -165,19 +315,21 @@ export function Study() {
     setStartLoading(true);
     setStartError(null);
     setSessionComplete(null);
+    stopTitlePoll();
     try {
       const res = await createSession({
         knowledge_source: selectedChapter.knowledge_source,
         focus_mode: focusMode,
         max_questions: sessionLength,
+        concept_ids: selectedConceptIds,
       });
-      const state = await getSessionState(res.session_id);
+      void refreshSessions();
       setSession({
         sessionId: res.session_id,
         title: res.title,
         maxQuestions: res.max_questions,
-        scalar: state.scalar,
-        questionCount: state.question_count,
+        scalar: res.scalar,
+        questionCount: 0,
         currentQuestion: null,
         history: [],
         dialogueMessages: [],
@@ -189,22 +341,98 @@ export function Study() {
         ratingContext: null,
         pendingAdvance: null,
       });
-      await loadNextQuestion(res.session_id);
+      if (res.title_pending) {
+        startTitlePoll(res.session_id);
+      }
+      setQuestionLoading(true);
+      setQuestionError(null);
+      try {
+        const q = await fetchQuestion(res.session_id, {});
+        setSession((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            questionCount: q.question_number,
+            currentQuestion: buildCurrentQuestion(q),
+          };
+        });
+      } catch (err) {
+        setQuestionError(err instanceof Error ? err.message : 'Failed to load question');
+      } finally {
+        setQuestionLoading(false);
+      }
     } catch (err) {
       setStartError(err instanceof Error ? err.message : 'Failed to start session');
     } finally {
       setStartLoading(false);
     }
-  }, [selectedChapter, canStart, focusMode, sessionLength, loadNextQuestion]);
+  }, [
+    selectedChapter,
+    canStart,
+    focusMode,
+    sessionLength,
+    selectedConceptIds,
+    startTitlePoll,
+    stopTitlePoll,
+    refreshSessions,
+  ]);
 
   const handleNewSession = useCallback(() => {
+    stopTitlePoll();
     setSession(null);
     setSessionComplete(null);
+    setExitConfirmOpen(false);
+    setExitError(null);
+    setExitLoading(false);
     setStartError(null);
     setQuestionError(null);
     setSubmitError(null);
     setPreambleStep('mode');
-  }, []);
+  }, [stopTitlePoll]);
+
+  useEffect(() => {
+    setFocused(session != null);
+    return () => setFocused(false);
+  }, [session, setFocused]);
+
+  useEffect(() => {
+    const openExitConfirm = () => {
+      setExitError(null);
+      setExitConfirmOpen(true);
+    };
+    setOnExitRequest(session != null ? openExitConfirm : null);
+    return () => setOnExitRequest(null);
+  }, [session, setOnExitRequest]);
+
+  useEffect(() => {
+    if (!exitConfirmOpen) return;
+    exitContinueRef.current?.focus();
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !exitLoading) {
+        setExitConfirmOpen(false);
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [exitConfirmOpen, exitLoading]);
+
+  const handleConfirmEndSession = useCallback(async () => {
+    if (!session || exitLoading) return;
+    setExitLoading(true);
+    setExitError(null);
+    try {
+      const ended = await endSession(session.sessionId);
+      stopTitlePoll();
+      setExitConfirmOpen(false);
+      setSession(null);
+      await refreshSessions();
+      navigate(`/sessions/${ended.session_id}`);
+    } catch (err) {
+      setExitError(err instanceof Error ? err.message : 'Failed to end session');
+    } finally {
+      setExitLoading(false);
+    }
+  }, [session, exitLoading, stopTitlePoll, refreshSessions, navigate]);
 
   const beginTutorReveal = useCallback(
     (tutorMessage: string, afterReveal: () => void) => {
@@ -380,6 +608,7 @@ export function Study() {
       const nextHistory = [...session.history, record];
 
       if (turnRes.phase === 'session_complete') {
+        stopTitlePoll();
         setSessionComplete({
           title: session.title,
           questionsAnswered: nextHistory.length,
@@ -409,7 +638,7 @@ export function Study() {
 
       await loadNextQuestion(session.sessionId);
     },
-    [session, loadNextQuestion],
+    [session, loadNextQuestion, stopTitlePoll],
   );
 
   const handleSubmitRating = useCallback(
@@ -600,6 +829,61 @@ export function Study() {
             </select>
           </section>
 
+          <section className="setup-section" aria-labelledby="study-concepts-heading">
+            <div className="study-concepts__header">
+              <h2 id="study-concepts-heading" className="setup-section__heading">
+                Concepts
+              </h2>
+              <button
+                type="button"
+                className="study-concepts__select-all"
+                onClick={selectAllConcepts}
+                disabled={conceptsLoading || selectableConceptIds.length === 0}
+              >
+                Select all
+              </button>
+            </div>
+            {conceptsLoading && (
+              <p className="study-concepts__status">Loading concepts…</p>
+            )}
+            {conceptsError && <p className="study-start__error">{conceptsError}</p>}
+            {!conceptsLoading && !conceptsError && conceptOptions.length === 0 && (
+              <p className="study-concepts__status">No compiled concepts for this chapter.</p>
+            )}
+            {!conceptsLoading && conceptOptions.length > 0 && (
+              <ul className="study-concepts__list" role="group" aria-label="Concepts to practice">
+                {conceptOptions.map((concept) => {
+                  const checked = selectedConceptIds.includes(concept.concept_id);
+                  const disabled = concept.question_count === 0;
+                  return (
+                    <li key={concept.concept_id}>
+                      <label
+                        className={`study-concepts__row${disabled ? ' study-concepts__row--disabled' : ''}${checked ? ' study-concepts__row--active' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="study-concepts__checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggleConcept(concept.concept_id)}
+                        />
+                        <span className="study-concepts__label">{concept.label}</span>
+                        <span className="study-concepts__count">
+                          {concept.question_count === 0
+                            ? 'no questions'
+                            : `${concept.question_count} questions`}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {!conceptsLoading && selectedConceptIds.length === 0 && conceptOptions.length > 0 && (
+              <p className="study-concepts__hint">Select at least one concept to start.</p>
+            )}
+          </section>
+
           <section className="setup-section" aria-labelledby="study-length-heading">
             <h2 id="study-length-heading" className="setup-section__heading">
               How many questions?
@@ -760,6 +1044,45 @@ export function Study() {
           <QuestionHistoryCard records={history} />
         </aside>
       </div>
+
+      {exitConfirmOpen && (
+        <div className="study-exit-modal" role="presentation">
+          <div
+            className="study-exit-modal__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="study-exit-title"
+            aria-describedby="study-exit-body"
+          >
+            <h2 id="study-exit-title" className="study-exit-modal__title">
+              End this session?
+            </h2>
+            <p id="study-exit-body" className="study-exit-modal__body">
+              Completed questions will be saved. The question you are on now will not be kept.
+            </p>
+            {exitError && <p className="study-exit-modal__error">{exitError}</p>}
+            <div className="study-exit-modal__actions">
+              <button
+                ref={exitContinueRef}
+                type="button"
+                className="btn btn--primary"
+                onClick={() => setExitConfirmOpen(false)}
+                disabled={exitLoading}
+              >
+                Continue studying
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => void handleConfirmEndSession()}
+                disabled={exitLoading}
+              >
+                {exitLoading ? 'Ending…' : 'End session'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

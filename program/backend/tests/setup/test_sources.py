@@ -148,3 +148,97 @@ def test_list_sources_shows_legacy_raw_files(chapter: Path):
 
 def test_compute_source_hash_empty_is_none():
     assert compute_source_hash({"sources": []}) is None
+
+
+def test_json_source_normalizes_to_text_not_executed(chapter: Path):
+    """JSON is converted to markdown text; never evaluated as code."""
+    payload = b'{"concept": "sets", "definition": "A set is a collection of objects."}'
+    entry = add_file_source(chapter, "concepts.json", payload, media_type="application/json")
+    assert entry["normalize_status"] == "ok"
+    text = normalized_texts(chapter)[0]["text"]
+    assert "sets" in text
+    assert "collection of objects" in text
+
+
+def test_svg_rejected(chapter: Path):
+    with pytest.raises(SourceError):
+        add_file_source(
+            chapter,
+            "diagram.svg",
+            b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+            media_type="image/svg+xml",
+        )
+
+
+def test_png_magic_mismatch_rejected(chapter: Path):
+    with pytest.raises(SourceError, match="not a valid PNG"):
+        add_file_source(chapter, "fake.png", b"not-a-png", media_type="image/png")
+
+
+def test_jpeg_magic_mismatch_rejected(chapter: Path):
+    with pytest.raises(SourceError, match="not a valid JPEG"):
+        add_file_source(chapter, "fake.jpg", b"GIF89a", media_type="image/jpeg")
+
+
+def test_image_mime_mismatch_rejected(chapter: Path):
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    with pytest.raises(SourceError, match="content type"):
+        add_file_source(chapter, "shot.png", png, media_type="image/jpeg")
+
+
+def test_png_source_uses_converter(chapter: Path):
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+    def fake_convert(target: str) -> str:
+        assert target.endswith(".png")
+        return "# Description\n\nA Venn diagram of two sets."
+
+    entry = add_file_source(
+        chapter, "venn.png", png, media_type="image/png", converter=fake_convert
+    )
+    assert entry["normalize_status"] == "ok"
+    assert "Venn diagram" in normalized_texts(chapter)[0]["text"]
+
+
+def test_jpeg_source_uses_converter(chapter: Path):
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+
+    def fake_convert(target: str) -> str:
+        return "# Description\n\nHandwritten notes about unions."
+
+    entry = add_file_source(
+        chapter, "notes.jpg", jpeg, media_type="image/jpeg", converter=fake_convert
+    )
+    assert entry["normalize_status"] == "ok"
+    assert "unions" in normalized_texts(chapter)[0]["text"]
+
+
+def test_image_normalize_fails_without_llm(chapter: Path, monkeypatch: pytest.MonkeyPatch):
+    from apore.config.llm import NoLLMConfigured
+
+    def boom():
+        raise NoLLMConfigured("no key")
+
+    monkeypatch.setattr(
+        "apore.providers.vision_client.build_vision_client",
+        boom,
+    )
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    entry = add_file_source(chapter, "venn.png", png, media_type="image/png")
+    assert entry["normalize_status"] == "failed"
+    assert "API key" in (entry["normalize_error"] or "") or "vision" in (
+        entry["normalize_error"] or ""
+    ).lower() or "configured" in (entry["normalize_error"] or "").lower()
+
+
+def test_normalized_output_size_cap(chapter: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("apore.setup.sources.MAX_NORMALIZED_BYTES", 32)
+
+    def huge(target: str) -> str:
+        return "x" * 100
+
+    entry = add_file_source(
+        chapter, "slides.pdf", b"%PDF-1.4 data", converter=huge
+    )
+    assert entry["normalize_status"] == "failed"
+    assert "exceeds" in (entry["normalize_error"] or "")

@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
+import { DURATION, EASE_OUT } from '../motion';
 
 export interface TurnRecord {
   question_number: number;
@@ -39,7 +40,7 @@ export function TurnThread({ turns }: TurnThreadProps) {
             className="turn-item"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            transition={{ duration: DURATION.soft, ease: EASE_OUT }}
           >
             <div className="turn-item__header">
               <span className="turn-item__q-label">Q{turn.question_number}</span>

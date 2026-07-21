@@ -17,6 +17,7 @@ from apore.runtime.state import (
     read_title,
     write_mastery,
     write_scalar,
+    write_session_status,
 )
 
 
@@ -72,7 +73,58 @@ def test_initialize_with_session_metadata(tmp_path: Path):
     assert meta["knowledge_source"] == "domain:discrete-math/01-set-theory"
     assert meta["focus_mode"] == "weak_points"
     assert meta["max_questions"] == "5"
+    assert meta["status"] == "active"
+    assert meta["ended_at"] == ""
     assert read_scalar(p) == pytest.approx(0.5)
+
+
+def test_write_session_status_roundtrip(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    initialize(
+        p,
+        title="Drill",
+        session_id="abc-123",
+        created_at="2026-06-03T12:00:00+00:00",
+        knowledge_source="domain:discrete-math/01-set-theory",
+        focus_mode="adaptive",
+        max_questions=10,
+    )
+    write_session_status(
+        p,
+        status="ended_early",
+        ended_at="2026-06-03T13:00:00+00:00",
+    )
+    meta = read_session_meta(p)
+    assert meta["status"] == "ended_early"
+    assert meta["ended_at"] == "2026-06-03T13:00:00+00:00"
+
+
+def test_legacy_session_meta_defaults_to_active(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    p.write_text(
+        "# Old Session\n\n"
+        "## Session\n"
+        "id: legacy-1\n"
+        "created_at: 2026-01-01T00:00:00+00:00\n"
+        "knowledge_source: domain:_pytest/01-intro\n"
+        "focus_mode: adaptive\n"
+        "max_questions: 10\n\n"
+        "## Scalar\n"
+        "0.5\n\n"
+        "## Mastery\n\n"
+        "## Asked Questions\n\n"
+        "## Question Log\n"
+        "| Q# |\n"
+        "|---|\n",
+        encoding="utf-8",
+    )
+    meta = read_session_meta(p)
+    assert meta["status"] == "active"
+    assert meta["ended_at"] == ""
+    write_session_status(p, status="completed", ended_at="2026-01-02T00:00:00+00:00")
+    meta2 = read_session_meta(p)
+    assert meta2["status"] == "completed"
+    assert meta2["ended_at"] == "2026-01-02T00:00:00+00:00"
 
 
 # ---------------------------------------------------------------------------

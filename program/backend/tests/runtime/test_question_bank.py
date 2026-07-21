@@ -269,6 +269,90 @@ def test_weak_points_exhausted_when_no_weak_concepts():
         )
 
 
+def test_select_respects_allowed_concept_subset():
+    chapter = _chapter()
+    bank = load_question_bank(chapter)
+    assert bank is not None
+    graph = load_concept_graph(chapter)
+    allowed = {"set_theory_intro"}
+
+    for n in range(1, 6):
+        picked = select_question(
+            bank=bank,
+            graph=graph,
+            concept_id=None,
+            scalar=0.5,
+            asked_ids=set(),
+            question_number=n,
+            allowed_concept_ids=allowed,
+        )
+        assert picked.concept_id == "set_theory_intro"
+
+
+def test_select_single_concept_allows_reuse_across_questions():
+    chapter = _chapter()
+    bank = load_question_bank(chapter)
+    assert bank is not None
+    graph = load_concept_graph(chapter)
+    allowed = {"sets_definition"}
+    asked: set[str] = set()
+    last: str | None = None
+
+    for n in range(1, 10):
+        picked = select_question(
+            bank=bank,
+            graph=graph,
+            concept_id=None,
+            scalar=0.5,
+            asked_ids=asked,
+            question_number=n,
+            last_concept_id=last,
+            allowed_concept_ids=allowed,
+        )
+        assert picked.concept_id == "sets_definition"
+        asked.add(picked.id)
+        last = picked.concept_id
+
+
+def test_select_empty_allowed_set_exhausted():
+    chapter = _chapter()
+    bank = load_question_bank(chapter)
+    assert bank is not None
+    graph = load_concept_graph(chapter)
+
+    with pytest.raises(QuestionBankExhaustedError, match="No concepts selected"):
+        select_question(
+            bank=bank,
+            graph=graph,
+            concept_id=None,
+            scalar=0.5,
+            asked_ids=set(),
+            question_number=1,
+            allowed_concept_ids=set(),
+        )
+
+
+def test_weak_points_respects_allowed_subset():
+    chapter = _chapter()
+    bank = load_question_bank(chapter)
+    assert bank is not None
+    graph = load_concept_graph(chapter)
+    mastery = {"sets_definition": 0.2, "set_theory_intro": 0.2}
+
+    picked = select_question(
+        bank=bank,
+        graph=graph,
+        concept_id=None,
+        scalar=0.5,
+        asked_ids=set(),
+        question_number=1,
+        mastery=mastery,
+        focus_mode="weak_points",
+        allowed_concept_ids={"set_theory_intro"},
+    )
+    assert picked.concept_id == "set_theory_intro"
+
+
 def test_validate_rejects_unknown_concept():
     chapter = _chapter()
     graph = load_concept_graph(chapter)

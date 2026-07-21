@@ -122,9 +122,75 @@ def validate_question_bank(bank: QuestionBank, graph: ConceptGraph) -> list[str]
     return errors
 
 
-def _depth_tiers(graph: ConceptGraph) -> tuple[int, int, int]:
+def select_concept_for_burst(
+    graph: ConceptGraph,
+    *,
+    question_number: int,
+    mastery: dict[str, float] | None,
+    bank: QuestionBank,
+    allowed_concept_ids: set[str] | None = None,
+) -> str:
+    """Pick concept by depth tier for calibration burst (questions 1–3)."""
+    burst_index = question_number - 1
+    if burst_index < 0 or burst_index > 2:
+        return select_next_concept(
+            graph,
+            mastery=mastery,
+            allowed_concept_ids=allowed_concept_ids,
+        )
+
+    low_d, mid_d, high_d = _depth_tiers(graph, allowed_concept_ids=allowed_concept_ids)
+    targets = [low_d, mid_d, high_d]
+    target_depth = targets[burst_index]
+
+    candidates = [
+        n
+        for n in graph.nodes.values()
+        if n.depth == target_depth
+        and _concept_allowed(n.id, allowed_concept_ids)
+        and _concept_has_bank_questions(bank, n.id)
+    ]
+    if not candidates:
+        candidates = [
+            n
+            for n in graph.nodes.values()
+            if _concept_allowed(n.id, allowed_concept_ids)
+            and _concept_has_bank_questions(bank, n.id)
+        ]
+    if not candidates:
+        return select_next_concept(
+            graph,
+            mastery=mastery,
+            allowed_concept_ids=allowed_concept_ids,
+        )
+
+    candidates.sort(key=lambda n: n.id)
+    return candidates[0].id
+
+
+def _concept_allowed(concept_id: str, allowed_concept_ids: set[str] | None) -> bool:
+    if allowed_concept_ids is None:
+        return True
+    return concept_id in allowed_concept_ids
+
+
+def _concept_has_bank_questions(bank: QuestionBank, concept_id: str) -> bool:
+    return any(q.concept_id == concept_id for q in bank.questions)
+
+
+def _depth_tiers(
+    graph: ConceptGraph,
+    *,
+    allowed_concept_ids: set[str] | None = None,
+) -> tuple[int, int, int]:
     """Return (low, mid, high) depth values from graph nodes."""
-    depths = sorted({n.depth for n in graph.nodes.values()})
+    depths = sorted(
+        {
+            n.depth
+            for n in graph.nodes.values()
+            if _concept_allowed(n.id, allowed_concept_ids)
+        }
+    )
     if not depths:
         return (0, 0, 0)
     if len(depths) == 1:
@@ -134,44 +200,6 @@ def _depth_tiers(graph: ConceptGraph) -> tuple[int, int, int]:
     high = depths[-1]
     mid = depths[len(depths) // 2]
     return (low, mid, high)
-
-
-def _concept_has_bank_questions(bank: QuestionBank, concept_id: str) -> bool:
-    return any(q.concept_id == concept_id for q in bank.questions)
-
-
-def select_concept_for_burst(
-    graph: ConceptGraph,
-    *,
-    question_number: int,
-    mastery: dict[str, float] | None,
-    bank: QuestionBank,
-) -> str:
-    """Pick concept by depth tier for calibration burst (questions 1–3)."""
-    burst_index = question_number - 1
-    if burst_index < 0 or burst_index > 2:
-        return select_next_concept(graph, mastery=mastery)
-
-    low_d, mid_d, high_d = _depth_tiers(graph)
-    targets = [low_d, mid_d, high_d]
-    target_depth = targets[burst_index]
-
-    candidates = [
-        n
-        for n in graph.nodes.values()
-        if n.depth == target_depth and _concept_has_bank_questions(bank, n.id)
-    ]
-    if not candidates:
-        candidates = [
-            n
-            for n in graph.nodes.values()
-            if _concept_has_bank_questions(bank, n.id)
-        ]
-    if not candidates:
-        return select_next_concept(graph, mastery=mastery)
-
-    candidates.sort(key=lambda n: n.id)
-    return candidates[0].id
 
 
 def _deprioritize_last_concept(
@@ -243,11 +271,17 @@ def _pick_from_concepts(
     return None
 
 
-def _weak_concept_ids(graph: ConceptGraph, mastery: dict[str, float]) -> list[str]:
+def _weak_concept_ids(
+    graph: ConceptGraph,
+    mastery: dict[str, float],
+    *,
+    allowed_concept_ids: set[str] | None = None,
+) -> list[str]:
     return sorted(
         n.id
         for n in graph.nodes.values()
-        if mastery.get(n.id, 0.0) < 0.7
+        if _concept_allowed(n.id, allowed_concept_ids)
+        and mastery.get(n.id, 0.0) < 0.7
     )
 
 
@@ -263,13 +297,18 @@ def select_question(
     requested_concept_id: str | None = None,
     focus_mode: str = "adaptive",
     last_concept_id: str | None = None,
+    allowed_concept_ids: set[str] | None = None,
 ) -> BankQuestion:
     """Select a bank question; avoid back-to-back same concept, prefer unused IDs."""
     mastery = mastery or {}
     weak_only = focus_mode == "weak_points"
+    allowed = allowed_concept_ids
+
+    if allowed is not None and not allowed:
+        raise QuestionBankExhaustedError("No concepts selected for this session")
 
     if weak_only:
-        weak_ids = _weak_concept_ids(graph, mastery)
+        weak_ids = _weak_concept_ids(graph, mastery, allowed_concept_ids=allowed)
         if not weak_ids:
             raise QuestionBankExhaustedError(
                 "No weak concepts remain for focused review in this session"
@@ -280,6 +319,7 @@ def select_question(
             mastery=mastery,
             scalar=scalar,
             weak_only=True,
+            allowed_concept_ids=allowed,
         )
         qtype = type_for_scalar(scalar)
         concept_ids_to_try = [selected_id] + [c for c in weak_ids if c != selected_id]
@@ -289,6 +329,7 @@ def select_question(
             question_number=question_number,
             mastery=mastery,
             bank=bank,
+            allowed_concept_ids=allowed,
         )
         qtype = burst_type_for_index(question_number - 1)
         concept_ids_to_try = [selected_id]
@@ -296,7 +337,7 @@ def select_question(
             pool = [
                 n.id
                 for n in sorted(graph.nodes.values(), key=lambda n: (n.depth, n.id))
-                if n.id != selected_id
+                if n.id != selected_id and _concept_allowed(n.id, allowed)
             ]
             concept_ids_to_try.extend(pool)
     else:
@@ -305,6 +346,7 @@ def select_question(
             requested_id=requested_concept_id or concept_id,
             mastery=mastery,
             scalar=scalar,
+            allowed_concept_ids=allowed,
         )
         qtype = type_for_scalar(scalar)
         concept_ids_to_try = [selected_id]
@@ -312,13 +354,23 @@ def select_question(
             pool = [
                 n.id
                 for n in sorted(graph.nodes.values(), key=lambda n: (n.depth, n.id))
-                if n.id != selected_id
+                if n.id != selected_id and _concept_allowed(n.id, allowed)
             ]
             concept_ids_to_try.extend(pool)
+
+    # Drop any concepts outside the allowed set (e.g. pinned request mismatch).
+    concept_ids_to_try = [
+        cid for cid in concept_ids_to_try if _concept_allowed(cid, allowed)
+    ]
+    if not concept_ids_to_try:
+        raise QuestionBankExhaustedError(
+            "No questions available for the selected concepts in this session"
+        )
 
     ordered_concepts = _deprioritize_last_concept(concept_ids_to_try, last_concept_id)
     downward_types = _relax_types(qtype)
     upward_types = _relax_types_upward(qtype)
+    single_concept_session = len(concept_ids_to_try) == 1
 
     # Tier 1: difficulty-appropriate types, prefer unused questions.
     picked = _pick_from_concepts(
@@ -355,7 +407,7 @@ def select_question(
             return picked
 
     # Tier 4: single-concept or no-alternative edge case — allow last concept.
-    if last_concept_id and last_concept_id in concept_ids_to_try:
+    if single_concept_session or (last_concept_id and last_concept_id in concept_ids_to_try):
         all_types = downward_types + [t for t in upward_types if t not in downward_types]
         picked = _pick_from_concepts(
             bank,

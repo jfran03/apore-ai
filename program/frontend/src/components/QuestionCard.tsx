@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
+import { DURATION, EASE_OUT } from '../motion';
 
 interface QuestionCardProps {
   question_text: string;
@@ -37,7 +38,7 @@ export function QuestionCard({
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -4 }}
-        transition={{ duration: 0.15 }}
+        transition={{ duration: DURATION.exit, ease: EASE_OUT }}
       >
         <div className="question-card__meta">
           <span className="question-card__progress">{progressLabel}</span>

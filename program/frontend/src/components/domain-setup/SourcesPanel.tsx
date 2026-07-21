@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  addUrlSource,
   deleteSource,
   getChapterSources,
-  uploadSources,
 } from '../../api/client';
 import type { CompileStage, SourceEntry } from '../../api/types';
 import { parseKnowledgeSource } from '../../shell/ActiveDomainContext';
+import {
+  dismiss,
+  enqueueFiles,
+  enqueueUrl,
+  getPending,
+  hasInFlight,
+  subscribe,
+  subscribeSettled,
+  type PendingUpload,
+} from './sourceUploadStore';
 
 interface SourcesPanelProps {
   knowledgeSource: string;
@@ -29,8 +37,12 @@ export function SourcesPanel({
   onCompile,
 }: SourcesPanelProps) {
   const [sources, setSources] = useState<SourceEntry[]>([]);
+  const [pending, setPending] = useState<PendingUpload[]>(() =>
+    getPending(knowledgeSource),
+  );
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [compilingStart, setCompilingStart] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [url, setUrl] = useState('');
   const [urlModalOpen, setUrlModalOpen] = useState(false);
@@ -39,20 +51,65 @@ export function SourcesPanel({
   const [message, setMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
+  const knowledgeSourceRef = useRef(knowledgeSource);
+  const onSourcesChangedRef = useRef(onSourcesChanged);
 
   const parsed = parseKnowledgeSource(knowledgeSource);
 
-  const load = useCallback(async (source: string) => {
-    setLoading(true);
-    try {
-      const res = await getChapterSources(source);
-      setSources(res.sources);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load sources');
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    knowledgeSourceRef.current = knowledgeSource;
+  }, [knowledgeSource]);
+
+  useEffect(() => {
+    onSourcesChangedRef.current = onSourcesChanged;
+  }, [onSourcesChanged]);
+
+  const refreshSources = useCallback(async (source: string) => {
+    const res = await getChapterSources(source);
+    if (knowledgeSourceRef.current !== source) return;
+    setSources(res.sources);
   }, []);
+
+  const load = useCallback(
+    async (source: string) => {
+      setLoading(true);
+      try {
+        await refreshSources(source);
+      } catch (err) {
+        if (knowledgeSourceRef.current === source) {
+          setError(err instanceof Error ? err.message : 'Failed to load sources');
+        }
+      } finally {
+        if (knowledgeSourceRef.current === source) {
+          setLoading(false);
+        }
+      }
+    },
+    [refreshSources],
+  );
+
+  // Subscribe to this chapter's pending rows only; do not clear the store.
+  useEffect(() => {
+    setPending(getPending(knowledgeSource));
+    return subscribe(knowledgeSource, () => {
+      setPending(getPending(knowledgeSource));
+    });
+  }, [knowledgeSource]);
+
+  // Soft-refresh when an upload for the active chapter settles (works after remount).
+  useEffect(() => {
+    return subscribeSettled((settledSource) => {
+      if (settledSource !== knowledgeSourceRef.current) return;
+      void refreshSources(settledSource)
+        .then(() => {
+          onSourcesChangedRef.current();
+          setError(null);
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : 'Failed to refresh sources');
+        });
+    });
+  }, [refreshSources]);
 
   useEffect(() => {
     setError(null);
@@ -75,23 +132,13 @@ export function SourcesPanel({
   }, [urlModalOpen]);
 
   const handleFiles = useCallback(
-    async (files: File[]) => {
+    (files: File[]) => {
       if (!files.length || !parsed) return;
-      setBusy(true);
       setError(null);
       setMessage(null);
-      try {
-        const res = await uploadSources(parsed.domainId, parsed.chapterId, files);
-        setMessage(`Added ${res.uploaded.length} source${res.uploaded.length === 1 ? '' : 's'}.`);
-        await load(knowledgeSource);
-        onSourcesChanged();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Upload failed');
-      } finally {
-        setBusy(false);
-      }
+      enqueueFiles(knowledgeSource, files);
     },
-    [parsed, knowledgeSource, load, onSourcesChanged],
+    [parsed, knowledgeSource],
   );
 
   const openUrlModal = () => {
@@ -106,37 +153,25 @@ export function SourcesPanel({
   };
 
   const openFilePicker = () => {
-    if (busy) return;
     fileInputRef.current?.click();
   };
 
-  const handleAddUrl = async () => {
-    if (!url.trim()) return;
-    setBusy(true);
+  const handleAddUrl = () => {
+    const trimmed = url.trim();
+    if (!trimmed || !parsed) return;
     setUrlError(null);
     setError(null);
     setMessage(null);
-    try {
-      const entry = await addUrlSource(url.trim(), knowledgeSource);
-      if (entry.normalize_status === 'failed') {
-        setUrlError(entry.normalize_error ?? 'The URL could not be converted.');
-        await load(knowledgeSource);
-        onSourcesChanged();
-        return;
-      }
-      setMessage('URL added.');
-      await load(knowledgeSource);
-      onSourcesChanged();
-      closeUrlModal();
-    } catch (err) {
-      setUrlError(err instanceof Error ? err.message : 'Could not add URL');
-    } finally {
-      setBusy(false);
-    }
+    enqueueUrl(knowledgeSource, trimmed);
+    closeUrlModal();
+  };
+
+  const dismissPending = (localId: string) => {
+    dismiss(knowledgeSource, localId);
   };
 
   const handleDelete = async (sourceId: string) => {
-    setBusy(true);
+    setDeletingId(sourceId);
     setError(null);
     try {
       const res = await deleteSource(sourceId, knowledgeSource);
@@ -145,25 +180,34 @@ export function SourcesPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed');
     } finally {
-      setBusy(false);
+      setDeletingId(null);
     }
   };
 
-  const compiling = compileStage === 'normalizing' || compileStage === 'compiling' || compileStage === 'validating';
-  const usableSources = sources.filter((s) => s.normalize_status === 'ok' || s.normalize_status === 'legacy');
-  const canCompile = usableSources.length > 0 && !compiling && !busy;
+  const uploadsInFlight = hasInFlight(knowledgeSource);
+  const compiling =
+    compileStage === 'normalizing' ||
+    compileStage === 'compiling' ||
+    compileStage === 'validating';
+  const usableSources = sources.filter(
+    (s) => s.normalize_status === 'ok' || s.normalize_status === 'legacy',
+  );
+  const canCompile =
+    usableSources.length > 0 && !compiling && !compilingStart && !uploadsInFlight;
 
   const handleCompileClick = async () => {
-    setBusy(true);
+    setCompilingStart(true);
     setError(null);
     try {
       await onCompile();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Compile failed to start');
     } finally {
-      setBusy(false);
+      setCompilingStart(false);
     }
   };
+
+  const showEmpty = !loading && sources.length === 0 && pending.length === 0;
 
   return (
     <section className="wb-panel" aria-label="Sources">
@@ -171,15 +215,21 @@ export function SourcesPanel({
         <div>
           <h2 className="wb-panel__title">Sources</h2>
           <p className="wb-panel__sub">
-            Upload documents or add a YouTube link. Each source is converted to markdown for the
-            compiler.
+            Upload documents, JSON, JPEG/PNG images, or add a YouTube link. Each source is
+            converted to markdown for the compiler.
           </p>
         </div>
         <button
           type="button"
           className="btn btn--primary"
           disabled={!canCompile}
-          title={usableSources.length === 0 ? 'Add at least one source that converts successfully' : undefined}
+          title={
+            uploadsInFlight
+              ? 'Wait for uploads to finish'
+              : usableSources.length === 0
+                ? 'Add at least one source that converts successfully'
+                : undefined
+          }
           onClick={handleCompileClick}
         >
           {compiling ? 'Compiling…' : 'Compile wiki'}
@@ -187,11 +237,10 @@ export function SourcesPanel({
       </div>
 
       <div
-        className={`wb-dropzone${dragOver ? ' wb-dropzone--over' : ''}${busy ? ' wb-dropzone--busy' : ''}`}
+        className={`wb-dropzone${dragOver ? ' wb-dropzone--over' : ''}`}
         role="button"
         tabIndex={0}
         aria-label="Upload sources: drop files here or click to browse"
-        aria-disabled={busy}
         onClick={openFilePicker}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -201,22 +250,24 @@ export function SourcesPanel({
         }}
         onDragOver={(e) => {
           e.preventDefault();
-          if (!busy) setDragOver(true);
+          setDragOver(true);
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          if (!busy) handleFiles(Array.from(e.dataTransfer.files));
+          handleFiles(Array.from(e.dataTransfer.files));
         }}
       >
         <p className="wb-dropzone__text">Drop files here, or click to upload</p>
-        <p className="wb-dropzone__hint">PDF, DOCX, PPTX, HTML, Markdown, CSV, and more.</p>
+        <p className="wb-dropzone__hint">
+          PDF, DOCX, PPTX, HTML, Markdown, CSV, JSON, JPEG, PNG, and more. Images are
+          analyzed by your configured vision model.
+        </p>
         <div className="wb-dropzone__actions">
           <button
             type="button"
             className="btn btn--secondary"
-            disabled={busy}
             onClick={(e) => {
               e.stopPropagation();
               openFilePicker();
@@ -227,7 +278,6 @@ export function SourcesPanel({
           <button
             type="button"
             className="btn btn--secondary"
-            disabled={busy}
             onClick={(e) => {
               e.stopPropagation();
               openUrlModal();
@@ -241,6 +291,7 @@ export function SourcesPanel({
           type="file"
           multiple
           hidden
+          accept=".pdf,.html,.htm,.md,.markdown,.txt,.docx,.pptx,.xlsx,.csv,.json,.xml,.epub,.jpg,.jpeg,.png,application/pdf,text/html,text/markdown,text/plain,text/csv,application/json,image/jpeg,image/png"
           onChange={(e) => {
             handleFiles(Array.from(e.target.files ?? []));
             e.target.value = '';
@@ -249,10 +300,63 @@ export function SourcesPanel({
       </div>
 
       <ul className="wb-source-list">
-        {loading && <li className="wb-source-list__empty">Loading sources…</li>}
-        {!loading && sources.length === 0 && (
-          <li className="wb-source-list__empty">No sources yet.</li>
+        {loading && pending.length === 0 && (
+          <li className="wb-source-list__empty">Loading sources…</li>
         )}
+        {showEmpty && <li className="wb-source-list__empty">No sources yet.</li>}
+        {pending.map((p) => (
+          <li
+            key={p.localId}
+            className="wb-source wb-source--pending"
+            aria-busy={p.status !== 'failed'}
+          >
+            <span className="wb-source__icon" aria-hidden="true">
+              {p.status === 'failed' ? (
+                p.kind === 'url' ? (
+                  '🔗'
+                ) : (
+                  '📄'
+                )
+              ) : (
+                <span className="wb-source__spinner" />
+              )}
+            </span>
+            <span className="wb-source__main">
+              <span className="wb-source__name" title={p.name}>
+                {p.name}
+              </span>
+              <span className="wb-source__meta">
+                {p.kind === 'file' ? formatBytes(p.size) : 'link'}
+                {p.status === 'uploading' && (
+                  <span className="wb-source__badge">Uploading…</span>
+                )}
+                {p.status === 'queued' && (
+                  <span className="wb-source__badge">Queued</span>
+                )}
+                {p.status === 'failed' && (
+                  <span className="wb-source__badge wb-source__badge--error">
+                    upload failed
+                  </span>
+                )}
+              </span>
+              {p.status === 'failed' && p.error && (
+                <span className="wb-source__error">{p.error}</span>
+              )}
+            </span>
+            {p.status === 'failed' ? (
+              <button
+                type="button"
+                className="btn btn--ghost wb-source__delete"
+                onClick={() => dismissPending(p.localId)}
+                aria-label={`Dismiss ${p.name}`}
+              >
+                Dismiss
+              </button>
+            ) : (
+              <span className="wb-source__pending-slot" aria-hidden="true" />
+            )}
+          </li>
+        ))}
         {sources.map((s) => (
           <li key={s.id} className="wb-source">
             <span className="wb-source__icon" aria-hidden="true">
@@ -283,11 +387,11 @@ export function SourcesPanel({
             <button
               type="button"
               className="btn btn--ghost wb-source__delete"
-              disabled={busy}
+              disabled={deletingId === s.id}
               onClick={() => handleDelete(s.id)}
               aria-label={`Remove ${s.display_name ?? s.id}`}
             >
-              Remove
+              {deletingId === s.id ? 'Removing…' : 'Remove'}
             </button>
           </li>
         ))}
@@ -301,7 +405,7 @@ export function SourcesPanel({
           className="wb-modal"
           role="presentation"
           onClick={(e) => {
-            if (e.target === e.currentTarget && !busy) closeUrlModal();
+            if (e.target === e.currentTarget) closeUrlModal();
           }}
         >
           <form
@@ -324,7 +428,6 @@ export function SourcesPanel({
               type="url"
               placeholder="https://www.youtube.com/watch?v=…"
               value={url}
-              disabled={busy}
               onChange={(e) => {
                 setUrl(e.target.value);
                 if (urlError) setUrlError(null);
@@ -333,16 +436,11 @@ export function SourcesPanel({
             />
             {urlError && <p className="wb-modal__error">{urlError}</p>}
             <div className="wb-modal__actions">
-              <button
-                type="button"
-                className="btn btn--ghost"
-                disabled={busy}
-                onClick={closeUrlModal}
-              >
+              <button type="button" className="btn btn--ghost" onClick={closeUrlModal}>
                 Cancel
               </button>
-              <button type="submit" className="btn btn--primary" disabled={busy || !url.trim()}>
-                {busy ? 'Adding…' : 'Add link'}
+              <button type="submit" className="btn btn--primary" disabled={!url.trim()}>
+                Add link
               </button>
             </div>
           </form>

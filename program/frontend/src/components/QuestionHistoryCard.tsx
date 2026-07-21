@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { DURATION, transition } from '../motion';
 
 export interface HistoryRecord {
   question_number: number;
@@ -18,8 +19,6 @@ const RATING_CLASS: Record<string, string> = {
   ok: 'history-row__rating--ok',
   hard: 'history-row__rating--hard',
 };
-
-const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 export function QuestionHistoryCard({ records }: QuestionHistoryCardProps) {
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -43,7 +42,7 @@ export function QuestionHistoryCard({ records }: QuestionHistoryCardProps) {
                   className="history-row"
                   initial={reduceMotion ? false : { opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.18, ease: EASE_OUT }}
+                  transition={transition(DURATION.enter, reduceMotion)}
                 >
                   <button
                     type="button"
@@ -73,7 +72,7 @@ export function QuestionHistoryCard({ records }: QuestionHistoryCardProps) {
                         initial={reduceMotion ? false : { height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-                        transition={{ duration: 0.15, ease: EASE_OUT }}
+                        transition={transition(DURATION.exit, reduceMotion)}
                       >
                         <p className="history-row__question">{record.question_text}</p>
                         {record.reward != null && (

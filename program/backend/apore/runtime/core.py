@@ -401,6 +401,7 @@ def generate_question(
     asked_ids: set[str] | None = None,
     focus_mode: str = "adaptive",
     last_concept_id: str | None = None,
+    allowed_concept_ids: set[str] | None = None,
 ) -> GeneratedQuestion:
     """Select from question bank when present; otherwise fall back to LLM generation."""
     graph = load_concept_graph(chapter)
@@ -421,6 +422,7 @@ def generate_question(
             requested_concept_id=concept_id,
             focus_mode=focus_mode,
             last_concept_id=last_concept_id,
+            allowed_concept_ids=allowed_concept_ids,
         )
         gen_response = format_question_block(entry, graph)
         concept_label = graph.label_for(entry.concept_id)
@@ -443,6 +445,7 @@ def generate_question(
         mastery=mastery_map,
         scalar=scalar,
         weak_only=weak_only,
+        allowed_concept_ids=allowed_concept_ids,
     )
     wiki_paths = get_wiki_paths(chapter, selected_id, graph)
 

@@ -43,6 +43,20 @@
   color: var(--color-ink);
 }
 
+.btn--danger {
+  background-color: var(--color-semantic-error);
+  color: var(--color-on-primary);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-semantic-error) 88%, #000);
+}
+
+.btn--danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* Page layout */
 .page {
   flex: 1;

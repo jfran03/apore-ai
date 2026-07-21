@@ -41,8 +41,17 @@ def fallback_session_title(
     return f"{knowledge_source} — {suffix}"
 
 
-def _concept_summary(graph: ConceptGraph, limit: int = 8) -> str:
-    labels = [n.label for n in sorted(graph.nodes.values(), key=lambda n: (n.depth, n.id))]
+def _concept_summary(
+    graph: ConceptGraph,
+    *,
+    concept_ids: list[str] | None = None,
+    limit: int = 8,
+) -> str:
+    if concept_ids:
+        nodes = [graph.nodes[cid] for cid in concept_ids if cid in graph.nodes]
+    else:
+        nodes = sorted(graph.nodes.values(), key=lambda n: (n.depth, n.id))
+    labels = [n.label for n in nodes]
     if not labels:
         return "(no concepts)"
     shown = labels[:limit]
@@ -59,6 +68,7 @@ def generate_session_title(
     provider: Provider | None,
     model: str,
     program_root,
+    concept_ids: list[str] | None = None,
 ) -> str:
     """Return a human-readable session title; always succeeds via fallback."""
     fallback = fallback_session_title(
@@ -84,7 +94,7 @@ def generate_session_title(
         f"domain: {domain_id}\n"
         f"chapter: {chapter_id}\n"
         f"display_name: {chapter.display_name or chapter_id}\n"
-        f"concepts: {_concept_summary(graph)}\n"
+        f"concepts: {_concept_summary(graph, concept_ids=concept_ids)}\n"
         f"focus_mode: {focus_mode}\n"
         f"max_questions: {max_questions}\n"
     )

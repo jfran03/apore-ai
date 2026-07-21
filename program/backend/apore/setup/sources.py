@@ -16,6 +16,7 @@ from pathlib import Path
 
 from apore.setup.normalize import (
     NormalizationError,
+    is_image_file,
     is_supported_file,
     normalize_file,
     normalize_url,
@@ -28,12 +29,63 @@ MANIFEST_NAME = "_manifest.json"
 
 MAX_SOURCE_BYTES = 25 * 1024 * 1024
 MAX_SOURCES_PER_CHAPTER = 50
+# Cap normalized markdown so converter expansion cannot fill the disk.
+MAX_NORMALIZED_BYTES = 2 * 1024 * 1024
+
+_JPEG_MAGIC = b"\xff\xd8\xff"
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+_IMAGE_MIME_BY_EXT = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+}
 
 _RESERVED_NAMES = {NORMALIZED_DIRNAME, MANIFEST_NAME, ".gitkeep", "README.md"}
 
 
 class SourceError(ValueError):
     """Raised for invalid source ingestion requests."""
+
+
+def _validate_image_content(
+    original_name: str, content: bytes, media_type: str | None
+) -> None:
+    """Reject SVG and polyglot/mismatched image uploads before storage."""
+    suffix = Path(original_name).suffix.lower()
+    if suffix == ".svg" or (media_type or "").lower() in {
+        "image/svg+xml",
+        "image/svg",
+    }:
+        raise SourceError("SVG images are not allowed (active content risk).")
+    if not is_image_file(original_name):
+        return
+
+    expected_mime = _IMAGE_MIME_BY_EXT.get(suffix)
+    reported = (media_type or "").split(";", 1)[0].strip().lower()
+    if reported and reported not in {"application/octet-stream", ""} and expected_mime:
+        if reported != expected_mime:
+            raise SourceError(
+                f"{original_name}: content type {reported!r} does not match "
+                f"extension {suffix}"
+            )
+
+    if suffix in {".jpg", ".jpeg"}:
+        if not content.startswith(_JPEG_MAGIC):
+            raise SourceError(f"{original_name} is not a valid JPEG file")
+    elif suffix == ".png":
+        if not content.startswith(_PNG_MAGIC):
+            raise SourceError(f"{original_name} is not a valid PNG file")
+
+
+def _enforce_normalized_size(text: str, label: str) -> str:
+    encoded = text.encode("utf-8")
+    if len(encoded) > MAX_NORMALIZED_BYTES:
+        raise NormalizationError(
+            f"Normalized text from {label} exceeds the "
+            f"{MAX_NORMALIZED_BYTES // (1024 * 1024)} MB limit"
+        )
+    return text
 
 
 def _now_iso() -> str:
@@ -199,6 +251,7 @@ def add_file_source(
         raise SourceError(
             f"{safe} exceeds the {MAX_SOURCE_BYTES // (1024 * 1024)} MB source limit"
         )
+    _validate_image_content(safe, content, media_type)
 
     manifest = load_manifest(chapter_root)
     entries = manifest["sources"]
@@ -238,6 +291,7 @@ def add_file_source(
     ndir.mkdir(parents=True, exist_ok=True)
     try:
         text = normalize_file(directory / stored_name, converter=converter)
+        text = _enforce_normalized_size(text, safe)
         norm_name = f"{source_id}.md"
         (ndir / norm_name).write_text(text, encoding="utf-8")
         entry["normalized_name"] = norm_name
@@ -287,6 +341,7 @@ def add_url_source(chapter_root: Path, url: str, *, converter=None) -> dict:
     ndir.mkdir(parents=True, exist_ok=True)
     try:
         text = normalize_url(validated, converter=converter)
+        text = _enforce_normalized_size(text, validated)
         norm_name = f"{source_id}.md"
         (ndir / norm_name).write_text(text, encoding="utf-8")
         entry["normalized_name"] = norm_name

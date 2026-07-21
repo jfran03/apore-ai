@@ -71,11 +71,23 @@ def test_parse_compile_response_rejects_non_json():
 
 
 def test_run_compile_reads_sources(chapter: Path):
-    provider = FakeProvider(_valid_response("notes-md"))
+    class CapturingProvider(Provider):
+        def __init__(self):
+            self.messages = None
+
+        def invoke(self, system_prompt, messages, model, config):
+            self.messages = messages
+            return _valid_response("notes-md")
+
+    provider = CapturingProvider()
     artifact = run_compile(
         chapter, provider=provider, model="m", program_root=_PROGRAM
     )
     assert {p.concept_id for p in artifact.pages} == {"sets", "operations"}
+    user_content = provider.messages[0]["content"]
+    assert "untrusted evidence" in user_content
+    assert "<untrusted_source id=\"notes-md\">" in user_content
+    assert "</untrusted_source>" in user_content
 
 
 def test_run_compile_without_sources_raises(tmp_path: Path):

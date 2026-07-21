@@ -1,40 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { createDomain, listSessions } from '../api/client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { deleteDomain, renameDomain } from '../api/client';
 import type { SessionSummary } from '../api/types';
+import { CreateDomainModal } from './CreateDomainModal';
 import { parseKnowledgeSource, useActiveDomain } from './ActiveDomainContext';
 
 const VISIBLE_SESSIONS = 5;
 
 function NewDomainAction() {
-  const { setActiveDomainId, refreshCatalog } = useActiveDomain();
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [domainId, setDomainId] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleCreate = async () => {
-    const id = domainId.trim();
-    if (!id) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await createDomain(id);
-      await refreshCatalog();
-      setActiveDomainId(id);
-      setDomainId('');
-      setOpen(false);
-      navigate('/setup');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create domain');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!open) {
-    return (
+  return (
+    <>
       <button
         type="button"
         className="sidebar__new-session"
@@ -42,44 +19,8 @@ function NewDomainAction() {
       >
         <span aria-hidden="true">⊕</span> New Domain
       </button>
-    );
-  }
-
-  return (
-    <form
-      className="sidebar__new-domain"
-      onSubmit={(e) => {
-        e.preventDefault();
-        handleCreate();
-      }}
-    >
-      <input
-        className="sidebar__new-domain-input"
-        value={domainId}
-        autoFocus
-        placeholder="domain-id"
-        disabled={busy}
-        onChange={(e) => setDomainId(e.target.value)}
-        aria-label="New domain id"
-      />
-      <div className="sidebar__new-domain-actions">
-        <button type="submit" className="btn btn--primary" disabled={busy || !domainId.trim()}>
-          Create
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          disabled={busy}
-          onClick={() => {
-            setOpen(false);
-            setError(null);
-          }}
-        >
-          Cancel
-        </button>
-      </div>
-      {error && <p className="sidebar__new-domain-error">{error}</p>}
-    </form>
+      <CreateDomainModal open={open} onClose={() => setOpen(false)} />
+    </>
   );
 }
 
@@ -151,21 +92,308 @@ function SessionRows({ sessions }: { sessions: SessionSummary[] }) {
   );
 }
 
-export function Sidebar() {
-  const { catalog, activeDomainId, setActiveDomainId } = useActiveDomain();
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+function MoreIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="5" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="19" r="1.75" />
+    </svg>
+  );
+}
+
+function DomainRow({
+  domainId,
+  active,
+  sessions,
+  onSelect,
+  onSessionsChanged,
+}: {
+  domainId: string;
+  active: boolean;
+  sessions: SessionSummary[];
+  onSelect: () => void;
+  onSessionsChanged: () => Promise<void>;
+}) {
+  const { setActiveDomainId, refreshCatalog } = useActiveDomain();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(domainId);
+  const [pendingDelete, setPendingDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    listSessions()
-      .then((res) => {
-        setSessions(res.sessions);
-        setSessionsLoaded(true);
-      })
-      .catch(() => {
-        // Keep the skeleton until a successful load; do not surface errors here.
+    if (editing) renameInputRef.current?.focus();
+  }, [editing]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      setMenuPos(null);
+      return;
+    }
+    const updatePos = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMenuPos({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
       });
-  }, []);
+    };
+    updatePos();
+    function onMouseDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', updatePos);
+    window.addEventListener('scroll', updatePos, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', updatePos);
+      window.removeEventListener('scroll', updatePos, true);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    deleteCancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) {
+        setPendingDelete(false);
+        setDeleteError(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pendingDelete, busy]);
+
+  const startRename = () => {
+    setMenuOpen(false);
+    setEditing(true);
+    setEditValue(domainId);
+    setRowError(null);
+  };
+
+  const cancelRename = () => {
+    setEditing(false);
+    setEditValue(domainId);
+    setRowError(null);
+  };
+
+  const handleRename = async () => {
+    const nextId = editValue.trim();
+    if (!nextId) return;
+    if (nextId === domainId) {
+      cancelRename();
+      return;
+    }
+    setBusy(true);
+    setRowError(null);
+    try {
+      await renameDomain(domainId, nextId);
+      await refreshCatalog();
+      await onSessionsChanged();
+      setActiveDomainId(nextId);
+      setEditing(false);
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : 'Could not rename domain');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteDomain(domainId);
+      setPendingDelete(false);
+      if (editing) cancelRename();
+      await refreshCatalog();
+      await onSessionsChanged();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Could not delete domain');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <li>
+        <form
+          className="sidebar__domain-rename"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleRename();
+          }}
+        >
+          <input
+            ref={renameInputRef}
+            className="sidebar__new-domain-input"
+            value={editValue}
+            disabled={busy}
+            onChange={(e) => setEditValue(e.target.value)}
+            aria-label={`Rename domain ${domainId}`}
+          />
+          <div className="sidebar__new-domain-actions">
+            <button type="button" className="btn btn--ghost" disabled={busy} onClick={cancelRename}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn--primary"
+              disabled={busy || !editValue.trim()}
+            >
+              Save
+            </button>
+          </div>
+          {rowError && <p className="sidebar__new-domain-error">{rowError}</p>}
+        </form>
+        <SessionRows sessions={sessions} />
+      </li>
+    );
+  }
+
+  return (
+    <li>
+      <div className={`sidebar__domain-row${active ? ' sidebar__domain-row--active' : ''}`}>
+        <button
+          type="button"
+          className={`sidebar__domain${active ? ' sidebar__domain--active' : ''}`}
+          onClick={onSelect}
+        >
+          {domainId}
+        </button>
+        <div className="sidebar__domain-menu" ref={menuRef}>
+          <button
+            ref={triggerRef}
+            type="button"
+            className="sidebar__domain-menu-trigger"
+            aria-label={`Domain actions for ${domainId}`}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            disabled={busy}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <MoreIcon />
+          </button>
+          {menuOpen && menuPos && (
+            <div
+              className="sidebar__domain-menu-panel"
+              role="menu"
+              aria-label={`Actions for ${domainId}`}
+              style={{ top: menuPos.top, right: menuPos.right }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="sidebar__domain-menu-item"
+                onClick={startRename}
+              >
+                Rename domain
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="sidebar__domain-menu-item sidebar__domain-menu-item--danger"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setPendingDelete(true);
+                  setDeleteError(null);
+                }}
+              >
+                Delete domain
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <SessionRows sessions={sessions} />
+
+      {pendingDelete && (
+        <div
+          className="sidebar__modal"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !busy) {
+              setPendingDelete(false);
+              setDeleteError(null);
+            }
+          }}
+        >
+          <div
+            className="sidebar__modal-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`domain-delete-title-${domainId}`}
+          >
+            <h3 id={`domain-delete-title-${domainId}`} className="sidebar__modal-title">
+              Delete domain?
+            </h3>
+            <p className="sidebar__modal-body">
+              Deleting <strong>{domainId}</strong> permanently removes everything downstream:
+              chapters, sources, compiled wiki, concept graphs, question banks, and all study
+              sessions under this domain.
+            </p>
+            {deleteError && <p className="sidebar__modal-error">{deleteError}</p>}
+            <div className="sidebar__modal-actions">
+              <button
+                ref={deleteCancelRef}
+                type="button"
+                className="btn btn--ghost"
+                disabled={busy}
+                onClick={() => {
+                  setPendingDelete(false);
+                  setDeleteError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                disabled={busy}
+                onClick={handleDelete}
+              >
+                {busy ? 'Deleting…' : 'Delete domain'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
+export function Sidebar() {
+  const {
+    catalog,
+    activeDomainId,
+    setActiveDomainId,
+    sessions,
+    sessionsLoaded,
+    refreshSessions,
+  } = useActiveDomain();
 
   const grouped = useMemo(() => {
     const byDomain = new Map<string, SessionSummary[]>();
@@ -192,18 +420,14 @@ export function Sidebar() {
         {ready ? (
           <ul className="sidebar__domains">
             {catalog.domains.map((d) => (
-              <li key={d.id}>
-                <button
-                  type="button"
-                  className={`sidebar__domain${
-                    d.id === activeDomainId ? ' sidebar__domain--active' : ''
-                  }`}
-                  onClick={() => setActiveDomainId(d.id)}
-                >
-                  {d.id}
-                </button>
-                <SessionRows sessions={grouped.get(d.id) ?? []} />
-              </li>
+              <DomainRow
+                key={d.id}
+                domainId={d.id}
+                active={d.id === activeDomainId}
+                sessions={grouped.get(d.id) ?? []}
+                onSelect={() => setActiveDomainId(d.id)}
+                onSessionsChanged={refreshSessions}
+              />
             ))}
           </ul>
         ) : (

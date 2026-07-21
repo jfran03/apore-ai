@@ -115,3 +115,36 @@ def test_generate_question_bank_protocol(tmp_path: Path):
     root, wiki, state, chapter, graph = _make_fixture(tmp_path)
     result = _assemble("generate-question-bank", root, wiki, state, chapter, graph)
     assert "generate-question-bank" in result["messages"][0]["content"]
+
+
+def test_domain_guidance_injected_for_teaching_protocol(tmp_path: Path):
+    root, wiki, state, chapter, graph = _make_fixture(tmp_path)
+    domain_md = chapter.chapter_root.parent.parent / "DOMAIN.md"
+    domain_md.write_text(
+        "# Discrete Math\n\n## Tutor Style\nSocratic — guide with questions.\n",
+        encoding="utf-8",
+    )
+    result = _assemble("generate-question", root, wiki, state, chapter, graph)
+    content = result["messages"][0]["content"]
+    assert "## Domain Guidance" in content
+    assert "Socratic — guide with questions." in content
+    assert content.index("## Domain Guidance") < content.index("## Protocol")
+
+
+def test_domain_guidance_skipped_for_extract_signals(tmp_path: Path):
+    root, wiki, state, chapter, graph = _make_fixture(tmp_path)
+    domain_md = chapter.chapter_root.parent.parent / "DOMAIN.md"
+    domain_md.write_text(
+        "# Discrete Math\n\n## Tutor Style\nSocratic\n",
+        encoding="utf-8",
+    )
+    result = _assemble("extract-signals", root, wiki, state, chapter, graph)
+    content = result["messages"][0]["content"]
+    assert "## Domain Guidance" not in content
+    assert "Socratic" not in content
+
+
+def test_domain_guidance_absent_when_no_domain_md(tmp_path: Path):
+    root, wiki, state, chapter, graph = _make_fixture(tmp_path)
+    result = _assemble("generate-question", root, wiki, state, chapter, graph)
+    assert "## Domain Guidance" not in result["messages"][0]["content"]

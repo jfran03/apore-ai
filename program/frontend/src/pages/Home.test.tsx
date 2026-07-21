@@ -102,7 +102,6 @@ describe('Home chapter chooser', () => {
     renderHome();
 
     expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
-    expect(screen.getByText('What do you want to learn today?')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'discrete-math' })).toBeInTheDocument();

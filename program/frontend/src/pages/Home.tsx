@@ -44,7 +44,6 @@ export function Home() {
         />
         <div className="home__hero-copy">
           <h1 className="home__title">Welcome back</h1>
-          <p className="home__subtitle">What do you want to learn today?</p>
         </div>
       </header>
 

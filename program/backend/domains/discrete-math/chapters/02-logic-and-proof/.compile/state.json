@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "source_hash": "a835c7a44a0516d0ec24ecba35681c687e65423fb3e290e17f80670ae37812a5",
+  "run_token": "8f1ccda0-7dd4-49f0-8e42-65d2fe61603a",
+  "started_at": "2026-07-21T01:52:55.755447+00:00",
+  "progress": {
+    "done": 1,
+    "total": 1
+  },
+  "error_code": null,
+  "error_message": null,
+  "stage": "ready",
+  "updated_at": "2026-07-21T01:54:35.851176+00:00"
+}

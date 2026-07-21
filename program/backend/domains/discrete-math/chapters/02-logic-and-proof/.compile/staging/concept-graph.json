@@ -1,0 +1,70 @@
+{
+  "nodes": [
+    {
+      "id": "mathematical_induction_definition",
+      "label": "Definition of Mathematical Induction",
+      "source_file": "introduction-to-induction-html",
+      "citations": [
+        "introduction-to-induction-html"
+      ],
+      "depth": 1
+    },
+    {
+      "id": "base_case",
+      "label": "Base Case in Mathematical Induction",
+      "source_file": "introduction-to-induction-html",
+      "citations": [
+        "introduction-to-induction-html"
+      ],
+      "depth": 2
+    },
+    {
+      "id": "inductive_step",
+      "label": "Inductive Step in Mathematical Induction",
+      "source_file": "introduction-to-induction-html",
+      "citations": [
+        "introduction-to-induction-html"
+      ],
+      "depth": 3
+    },
+    {
+      "id": "ladder_analogy",
+      "label": "Ladder Analogy for Mathematical Induction",
+      "source_file": "introduction-to-induction-html",
+      "citations": [
+        "introduction-to-induction-html"
+      ],
+      "depth": 0
+    }
+  ],
+  "edges": [
+    {
+      "source": "mathematical_induction_definition",
+      "target": "base_case",
+      "relation": "prerequisite_of",
+      "provenance": "source_explicit",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "source": "mathematical_induction_definition",
+      "target": "inductive_step",
+      "relation": "prerequisite_of",
+      "provenance": "source_explicit",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "source": "base_case",
+      "target": "inductive_step",
+      "relation": "prerequisite_of",
+      "provenance": "source_explicit",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "source": "ladder_analogy",
+      "target": "mathematical_induction_definition",
+      "relation": "illustrates",
+      "provenance": "source_explicit",
+      "confidence": "EXTRACTED"
+    }
+  ]
+}

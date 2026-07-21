@@ -11,16 +11,18 @@ This folder (`prototype/`) is the **development workspace**: specs (`PRD.md`, `D
 | Location | Purpose |
 |----------|---------|
 | `prototype/` (repo root) | Dev environment, research docs, agent rules for building the prototype |
-| `prototype/program/` | **Runs.** Python package, CLI/scripts, protocols, `AGENT.md`, domain skeleton, fixtures manifest, tests |
+| `prototype/program/backend/` | **Runs.** Python package, CLI/scripts, protocols, `AGENT.md`, domain skeleton, fixtures manifest, tests |
+| `prototype/program/frontend/` | **Runs.** React/TS client (web + Tauri desktop) |
 
 When implementing Milestone A or later milestones:
 
-- Put new Python modules under `program/apore/`.
-- Put `shared/protocols/`, `shared/_templates/`, and session scripts under `program/`.
-- Run tests and CLIs with working directory `program/` (or resolve paths from `program/` as `PROGRAM_ROOT`).
+- Put new Python modules under `program/backend/apore/`.
+- Put `shared/protocols/`, `shared/_templates/`, and session scripts under `program/backend/`.
+- Run tests and CLIs with working directory `program/backend/` (or resolve paths from `program/backend/` as `PROGRAM_ROOT`).
+- Put client code under `program/frontend/`.
 - Do **not** add runtime packages at the prototype root.
 
-The tutor harness markdown the **runtime** loads is `program/AGENTS.md` (model-agnostic). Root `CLAUDE.md` (`@AGENTS.md`) is for this dev workspace only.
+The tutor harness markdown the **runtime** loads is `program/backend/AGENTS.md` (model-agnostic). Root `CLAUDE.md` (`@AGENTS.md`) is for this dev workspace only.
 
 See `program/README.md` for what belongs inside the runnable tree.
 

@@ -1,0 +1,93 @@
+/* Card */
+.card {
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xl);
+}
+
+/* Button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 var(--spacing-base);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.btn--primary {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.btn--primary:hover {
+  background-color: var(--color-primary-active);
+}
+
+.btn--ghost {
+  background-color: transparent;
+  color: var(--color-body);
+  border: 1px solid var(--color-hairline);
+}
+
+.btn--ghost:hover {
+  background-color: var(--color-hairline-soft);
+  color: var(--color-ink);
+}
+
+.btn--danger {
+  background-color: var(--color-semantic-error);
+  color: var(--color-on-primary);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-semantic-error) 88%, #000);
+}
+
+.btn--danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Page layout */
+.page {
+  flex: 1;
+  padding: var(--spacing-xxl) var(--spacing-xl);
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.page__title {
+  font-size: var(--font-size-display-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-ink);
+  margin-bottom: var(--spacing-base);
+}
+
+.page__subtitle {
+  font-size: var(--font-size-body-md);
+  color: var(--color-muted);
+}
+
+/* Session transcript (read-only) */
+.transcript {
+  margin-top: var(--spacing-lg);
+  overflow-x: auto;
+}
+
+.transcript__pre {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-code);
+  line-height: 1.6;
+  color: var(--color-ink);
+  white-space: pre-wrap;
+}

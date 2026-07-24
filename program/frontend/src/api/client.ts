@@ -7,6 +7,7 @@ import type {
   TurnRequest,
   TurnResponse,
   SessionStateResponse,
+  LearnerMasteryResponse,
   ProviderConfig,
   ProviderConfigUpdate,
   BatchRunRequest,
@@ -110,6 +111,13 @@ export async function postTurn(sessionId: string, req: TurnRequest): Promise<Tur
 
 export async function getSessionState(sessionId: string): Promise<SessionStateResponse> {
   return apiFetch<SessionStateResponse>(`/sessions/${sessionId}/state`);
+}
+
+export async function getLearnerMastery(
+  knowledgeSource: string,
+): Promise<LearnerMasteryResponse> {
+  const qs = new URLSearchParams({ knowledge_source: knowledgeSource });
+  return apiFetch<LearnerMasteryResponse>(`/learner/mastery?${qs.toString()}`);
 }
 
 export async function getProviderConfig(): Promise<ProviderConfig> {

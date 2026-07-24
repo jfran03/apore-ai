@@ -117,7 +117,12 @@ class SessionStateResponse(BaseModel):
     title: str
     scalar: float
     question_count: int
-    mastery: dict[str, float]
+    mastery: dict[str, float] = Field(
+        description=(
+            "BKT-derived P(L) per concept with observations for this "
+            "knowledge_source (cross-session). Unobserved concepts omitted."
+        ),
+    )
     knowledge_source: str
     focus_mode: str
     max_questions: int
@@ -127,6 +132,27 @@ class SessionStateResponse(BaseModel):
     title_pending: bool = False
     status: Literal["active", "completed", "ended_early"] = "active"
     ended_at: str | None = None
+
+
+class BKTParamsView(BaseModel):
+    p_L0: float
+    p_T: float
+    p_G: float
+    p_S: float
+    p_F: float
+
+
+class ConceptMasteryView(BaseModel):
+    p_mastery: float | None
+    band: Literal["new", "struggling", "learning", "proficient"]
+    n_observed: int
+    display_pct: int | None
+
+
+class LearnerMasteryResponse(BaseModel):
+    knowledge_source: str
+    params: BKTParamsView
+    concepts: dict[str, ConceptMasteryView]
 
 
 class EndSessionResponse(BaseModel):

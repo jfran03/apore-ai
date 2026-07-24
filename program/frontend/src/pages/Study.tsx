@@ -9,8 +9,9 @@ import {
   setStoredKnowledgeSource,
   getWikiPreview,
   getQuestionBank,
+  getLearnerMastery,
 } from '../api/client';
-import type { QuestionResponse, TurnResponse } from '../api/types';
+import type { MasteryBand, QuestionResponse, TurnResponse } from '../api/types';
 import { useActiveDomain } from '../shell/ActiveDomainContext';
 import { useStudyFocus } from '../shell/StudyFocusContext';
 import { QuestionCard } from '../components/QuestionCard';
@@ -33,6 +34,8 @@ interface ConceptOption {
   label: string;
   order: number;
   question_count: number;
+  display_pct: number | null;
+  band: MasteryBand | null;
 }
 
 interface CurrentQuestion {
@@ -176,9 +179,10 @@ export function Study() {
       setConceptsLoading(true);
       setConceptsError(null);
       try {
-        const [wiki, bank] = await Promise.all([
+        const [wiki, bank, masteryResult] = await Promise.all([
           getWikiPreview('published', source),
           getQuestionBank(source),
+          getLearnerMastery(source).catch(() => null),
         ]);
         if (cancelled) return;
 
@@ -189,12 +193,17 @@ export function Study() {
 
         const options: ConceptOption[] = [...wiki.pages]
           .sort((a, b) => a.order - b.order || a.concept_id.localeCompare(b.concept_id))
-          .map((page) => ({
-            concept_id: page.concept_id,
-            label: page.label,
-            order: page.order,
-            question_count: counts.get(page.concept_id) ?? 0,
-          }));
+          .map((page) => {
+            const mastery = masteryResult?.concepts[page.concept_id];
+            return {
+              concept_id: page.concept_id,
+              label: page.label,
+              order: page.order,
+              question_count: counts.get(page.concept_id) ?? 0,
+              display_pct: mastery?.display_pct ?? null,
+              band: mastery?.band ?? null,
+            };
+          });
 
         setConceptOptions(options);
         setSelectedConceptIds(
@@ -855,10 +864,31 @@ export function Study() {
                 {conceptOptions.map((concept) => {
                   const checked = selectedConceptIds.includes(concept.concept_id);
                   const disabled = concept.question_count === 0;
+                  const countLabel =
+                    concept.question_count === 0
+                      ? 'no questions'
+                      : `${concept.question_count} questions`;
+                  const masteryLabel =
+                    concept.band == null
+                      ? null
+                      : concept.band === 'new' || concept.display_pct == null
+                        ? 'New'
+                        : `${concept.display_pct}%`;
+                  const masteryClass =
+                    concept.band == null
+                      ? null
+                      : `study-concepts__mastery study-concepts__mastery--${concept.band}`;
+                  const ariaDescription =
+                    concept.band != null && masteryLabel != null
+                      ? concept.band === 'new'
+                        ? 'Mastery New'
+                        : `Mastery ${concept.display_pct} percent, ${concept.band}`
+                      : undefined;
                   return (
                     <li key={concept.concept_id}>
                       <label
                         className={`study-concepts__row${disabled ? ' study-concepts__row--disabled' : ''}${checked ? ' study-concepts__row--active' : ''}`}
+                        aria-description={ariaDescription}
                       >
                         <input
                           type="checkbox"
@@ -868,10 +898,16 @@ export function Study() {
                           onChange={() => toggleConcept(concept.concept_id)}
                         />
                         <span className="study-concepts__label">{concept.label}</span>
-                        <span className="study-concepts__count">
-                          {concept.question_count === 0
-                            ? 'no questions'
-                            : `${concept.question_count} questions`}
+                        <span className="study-concepts__meta">
+                          {masteryLabel != null && masteryClass != null && (
+                            <span className={masteryClass}>{masteryLabel}</span>
+                          )}
+                          {masteryLabel != null && (
+                            <span className="study-concepts__sep" aria-hidden="true">
+                              ·
+                            </span>
+                          )}
+                          <span className="study-concepts__count">{countLabel}</span>
                         </span>
                       </label>
                     </li>

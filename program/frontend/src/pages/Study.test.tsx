@@ -14,6 +14,7 @@ import type {
 const getKnowledgeCatalog = vi.fn();
 const getWikiPreview = vi.fn();
 const getQuestionBank = vi.fn();
+const getLearnerMastery = vi.fn();
 const createSession = vi.fn();
 const fetchQuestion = vi.fn();
 const getSessionState = vi.fn();
@@ -28,6 +29,7 @@ vi.mock('../api/client', async () => {
     getKnowledgeCatalog: (...args: unknown[]) => getKnowledgeCatalog(...args),
     getWikiPreview: (...args: unknown[]) => getWikiPreview(...args),
     getQuestionBank: (...args: unknown[]) => getQuestionBank(...args),
+    getLearnerMastery: (...args: unknown[]) => getLearnerMastery(...args),
     createSession: (...args: unknown[]) => createSession(...args),
     fetchQuestion: (...args: unknown[]) => fetchQuestion(...args),
     getSessionState: (...args: unknown[]) => getSessionState(...args),
@@ -191,6 +193,30 @@ beforeEach(() => {
   getKnowledgeCatalog.mockReset();
   getWikiPreview.mockReset();
   getQuestionBank.mockReset();
+  getLearnerMastery.mockReset().mockResolvedValue({
+    knowledge_source: 'domain:discrete-math/01-set-theory',
+    params: { p_L0: 0, p_T: 0.1, p_G: 0.2, p_S: 0.1, p_F: 0 },
+    concepts: {
+      what_is_a_set: {
+        p_mastery: 0.82,
+        band: 'proficient',
+        n_observed: 7,
+        display_pct: 82,
+      },
+      set_operations: {
+        p_mastery: null,
+        band: 'new',
+        n_observed: 0,
+        display_pct: null,
+      },
+      empty_topic: {
+        p_mastery: null,
+        band: 'new',
+        n_observed: 0,
+        display_pct: null,
+      },
+    },
+  });
   createSession.mockReset();
   fetchQuestion.mockReset();
   getSessionState.mockReset();
@@ -240,6 +266,20 @@ describe('Study concept selection', () => {
     });
     expect(screen.getByLabelText(/Empty Topic/i)).toBeDisabled();
     expect(screen.getByLabelText(/Empty Topic/i)).not.toBeChecked();
+    expect(screen.getByText('82%')).toBeInTheDocument();
+    expect(screen.getAllByText('New').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('soft-degrades when mastery endpoint fails', async () => {
+    getLearnerMastery.mockRejectedValueOnce(new Error('mastery unavailable'));
+    await openChatConfig();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/What is a Set/i)).toBeChecked();
+    });
+    expect(screen.queryByText('82%')).not.toBeInTheDocument();
+    expect(screen.queryByText('New')).not.toBeInTheDocument();
+    expect(screen.getAllByText('1 questions').length).toBeGreaterThanOrEqual(1);
   });
 
   it('prevents deselecting the last concept', async () => {

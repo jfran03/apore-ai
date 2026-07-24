@@ -350,7 +350,7 @@ def test_generate_question_from_bank_not_ephemeral(tmp_path: Path):
     assert generated.question_text
 
 
-def test_finalize_turn_updates_mastery(tmp_path: Path):
+def test_finalize_turn_appends_log_without_legacy_mastery(tmp_path: Path):
     state_path = tmp_path / "learner-state.md"
     state.initialize(state_path)
     question = GeneratedQuestion(
@@ -379,4 +379,9 @@ def test_finalize_turn_updates_mastery(tmp_path: Path):
         explicit_rating="ok",
         state_path=state_path,
     )
-    assert state.read_mastery(state_path)["sets_definition"] == pytest.approx(0.15)
+    # Legacy ## Mastery map is no longer written; logs are the source of truth.
+    assert state.read_mastery(state_path) == {}
+    rows = state.parse_question_log(state_path)
+    assert len(rows) == 1
+    assert rows[0]["concept"] == "sets_definition"
+    assert rows[0]["correct"] == "yes"

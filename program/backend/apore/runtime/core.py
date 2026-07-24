@@ -406,7 +406,17 @@ def generate_question(
     """Select from question bank when present; otherwise fall back to LLM generation."""
     graph = load_concept_graph(chapter)
     scalar = state.read_scalar(state_path)
-    mastery_map = mastery if mastery is not None else state.read_mastery(state_path)
+    if mastery is not None:
+        mastery_map = mastery
+    else:
+        # Derive-on-read BKT from cross-session logs (PROGRESSION.md).
+        from apore.runtime.mastery import derive_mastery_floats
+
+        meta = state.read_session_meta(state_path)
+        ks = meta.get("knowledge_source") or ""
+        mastery_map = (
+            derive_mastery_floats(program_root / "sessions", ks) if ks else {}
+        )
     asked = asked_ids if asked_ids is not None else state.read_asked_ids(state_path)
     bank = load_question_bank(chapter)
 
@@ -581,14 +591,8 @@ def finalize_turn(
         },
     )
     state.write_scalar(state_path, new_difficulty)
-
-    mastery = state.read_mastery(state_path)
-    current = mastery.get(question.concept_id, 0.0)
-    if assessment.correct == "yes":
-        mastery[question.concept_id] = min(1.0, current + 0.15)
-    else:
-        mastery[question.concept_id] = max(0.0, current - 0.1)
-    state.write_mastery(state_path, mastery)
+    # Per-concept mastery is derive-on-read BKT over question logs
+    # (PROGRESSION.md). Do not write the legacy ## Mastery heuristic map.
 
     return GradingResult(
         question_number=question.question_number,

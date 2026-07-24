@@ -44,9 +44,10 @@ Build the minimum working system that collects the interaction data needed to an
 - Provider-abstraction layer (Anthropic + NIM).
 - Headless simulated-student session runner.
 - Per-chapter `learner-state.md` logging at per-question granularity + per-node mastery.
+- Derive-on-read BKT per-concept mastery from session question logs; expose via API; show percentage in the study concept picker.
 
 ### Out of scope (Phase 3+)
-- GRPO fine-tuning / weight updates; IRT difficulty estimation; a knowledge-tracing model.
+- GRPO fine-tuning / weight updates; IRT difficulty estimation; fitted BKT parameters / forgetting (`P(F)`).
 - Vector / GraphRAG retrieval (we use lightweight neighbor traversal, not embeddings).
 - Multi-domain testing beyond discrete math; real human participants; full MathTutorBench run.
 - Rich freeform graph editor; learner-state overlay visualization.
@@ -180,6 +181,8 @@ Carried over from the Phase 2 design, with the arithmetic owned by the runtime.
 - **Signal scoring:** rating easy=+1 / ok=0 / hard=−1; correct yes=+0.5 / no=−0.5; hints 0=+0.2 / 1–2=0 / 3+=−0.2; hedging 0=+0.1 / 1–2=0 / 3+=−0.1; turns ≤3=+0.1 / 4–6=0 / 7+=−0.1.
 - **POMDP framing:** State = (graph + dialogue history + difficulty state); Action = next question; Observation = learner response; Reward = composite above.
 
+**Concept mastery (orthogonal):** per-concept `P(L)` via BKT over the question log; does not alter `R`, `α`, or the difficulty scalar. See `PROGRESSION.md`.
+
 **Two difficulty dimensions:** (1) concept depth = topological position in the DAG; (2) question type (recall/apply/synthesis). Logged separately so Phase 3 can attribute changes to each.
 
 ---
@@ -189,8 +192,8 @@ Carried over from the Phase 2 design, with the arithmetic owned by the runtime.
 ### 8.1 `learner-state.md` (sole data store, per chapter)
 - Initialization block (calibration-burst result → starting scalar).
 - Current difficulty scalar.
-- **Per-node mastery map** keyed to graph node IDs.
 - **Question log** — one row per question: `Q# | session | date | concept | question type | intended difficulty | explicit rating | correct | hints | turns | hedging | reward R | new difficulty`.
+- Question logs may live in per-session UUID files. **Per-node mastery is a derived view** over those logs (BKT), not a separately authored write-ahead map. A rolled-up `learner-state.md` is optional export, not the source of truth.
 
 ### 8.2 Prerequisite graph artifact (plaintext, e.g. `concept-graph.json`)
 - Nodes: `{ id, label, source_file, depth }`.
@@ -234,7 +237,7 @@ Carried over from the Phase 2 design, with the arithmetic owned by the runtime.
 ---
 
 ## 12. Phase 3 handoff
-GRPO fine-tuning (e.g. Qwen2.5-7B-Instruct), IRT cold-start, knowledge-tracing integration, rich graph editor, learner-state overlay demo, post-session factual-consistency audit, full MathTutorBench run, and any multi-domain expansion. The per-question logs and frozen-DAG runs produced in Phase 2 are the inputs.
+GRPO fine-tuning (e.g. Qwen2.5-7B-Instruct), IRT cold-start, fitted BKT parameters / forgetting (`P(F)`), rich graph editor, learner-state overlay on the graph viewer, post-session factual-consistency audit, full MathTutorBench run, and any multi-domain expansion. The per-question logs and frozen-DAG runs produced in Phase 2 are the inputs.
 
 ---
 

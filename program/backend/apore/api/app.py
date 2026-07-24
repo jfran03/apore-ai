@@ -16,8 +16,10 @@ from apore.api.schemas import (
     AddUrlSourceRequest,
     BatchRunRequest,
     BatchRunResponse,
+    BKTParamsView,
     ChapterArtifactStatus,
     CompileStatus,
+    ConceptMasteryView,
     ConceptOrderRequest,
     CreateChapterRequest,
     CreateDomainRequest,
@@ -28,6 +30,7 @@ from apore.api.schemas import (
     EndSessionResponse,
     FixtureFetchResponse,
     KnowledgeCatalogResponse,
+    LearnerMasteryResponse,
     ProviderConfigResponse,
     ProviderConfigUpdate,
     QuestionBankEntry,
@@ -59,6 +62,8 @@ from apore.fixtures.loader import load_manifest
 from apore.knowledge.chapter import ChapterContext, load_concept_graph, resolve_chapter
 from apore.providers import get_provider
 from apore.runtime import state
+from apore.runtime.bkt import DEFAULT_PARAMS
+from apore.runtime.mastery import derive_mastery, derive_mastery_floats
 from apore.runtime.core import (
     AssessmentResult,
     GeneratedQuestion,
@@ -264,12 +269,19 @@ def _resolve_session_concept_ids(
 
 def _session_state_response(sess: SessionState) -> SessionStateResponse:
     remaining = max(0, sess.max_questions - sess.question_count)
+    graph = load_concept_graph(sess.chapter)
+    concept_ids = graph.ordered_ids() or list(sess.concept_ids)
+    mastery = derive_mastery_floats(
+        SESSIONS_DIR,
+        sess.knowledge_source,
+        concept_ids,
+    )
     return SessionStateResponse(
         session_id=sess.session_id,
         title=sess.title,
         scalar=state.read_scalar(sess.state_path),
         question_count=sess.question_count,
-        mastery=state.read_mastery(sess.state_path),
+        mastery=mastery,
         knowledge_source=sess.knowledge_source,
         focus_mode=sess.focus_mode,
         max_questions=sess.max_questions,
@@ -814,6 +826,12 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
     question_number = sess.question_count + 1
     metadata = _build_metadata(sess)
     allowed = set(sess.concept_ids) if sess.concept_ids else None
+    graph = load_concept_graph(sess.chapter)
+    mastery = derive_mastery_floats(
+        SESSIONS_DIR,
+        sess.knowledge_source,
+        graph.ordered_ids() or list(sess.concept_ids),
+    )
 
     try:
         generated = generate_question(
@@ -827,6 +845,7 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
             config={},
             metadata=metadata,
             program_root=PROGRAM_ROOT,
+            mastery=mastery,
             asked_ids=sess.asked_question_ids,
             focus_mode=sess.focus_mode,
             last_concept_id=sess.active_concept_id,
@@ -1072,6 +1091,44 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
 def get_session_state(session_id: str) -> SessionStateResponse:
     sess = _get_session(session_id)
     return _session_state_response(sess)
+
+
+@app.get("/learner/mastery", response_model=LearnerMasteryResponse)
+def get_learner_mastery(knowledge_source: str) -> LearnerMasteryResponse:
+    """Derive-on-read BKT mastery for all concepts in a chapter."""
+    source = (knowledge_source or "").strip()
+    if not source:
+        raise HTTPException(status_code=400, detail="knowledge_source is required")
+    try:
+        chapter = resolve_chapter(source, PROGRAM_ROOT)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    graph = load_concept_graph(chapter)
+    concept_ids = graph.ordered_ids()
+    derived = derive_mastery(SESSIONS_DIR, chapter.knowledge_source, concept_ids)
+    params = DEFAULT_PARAMS
+    return LearnerMasteryResponse(
+        knowledge_source=chapter.knowledge_source,
+        params=BKTParamsView(
+            p_L0=params.p_L0,
+            p_T=params.p_T,
+            p_G=params.p_G,
+            p_S=params.p_S,
+            p_F=params.p_F,
+        ),
+        concepts={
+            cid: ConceptMasteryView(
+                p_mastery=m.p_mastery,
+                band=m.band,
+                n_observed=m.n_observed,
+                display_pct=m.display_pct,
+            )
+            for cid, m in derived.items()
+        },
+    )
 
 
 @app.post("/sessions/{session_id}/end", response_model=EndSessionResponse)

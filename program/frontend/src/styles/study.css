@@ -242,6 +242,42 @@
   color: var(--color-ink);
 }
 
+.study-concepts__meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.study-concepts__mastery {
+  font-size: var(--font-size-caption);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.study-concepts__mastery--new {
+  color: var(--color-muted-soft);
+}
+
+.study-concepts__mastery--struggling {
+  color: var(--color-ink);
+}
+
+.study-concepts__mastery--learning {
+  color: var(--color-muted);
+}
+
+.study-concepts__mastery--proficient {
+  color: var(--color-semantic-success, #1f8a65);
+}
+
+.study-concepts__sep {
+  font-size: var(--font-size-caption);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  color: var(--color-muted-soft);
+}
+
 .study-concepts__count {
   font-size: var(--font-size-caption);
   color: var(--color-muted);

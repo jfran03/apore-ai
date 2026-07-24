@@ -314,6 +314,50 @@ def append_asked_id(path: Path, question_id: str) -> None:
     _write_text(path, updated)
 
 
+def _question_log_header(text: str) -> tuple[re.Match[str], list[str]]:
+    """Locate the Question Log header/separator and return (match, columns)."""
+    header_match = re.search(
+        r"\| Q# \|.*?\|.*?\n\|[-| ]+\|",
+        text,
+    )
+    if not header_match:
+        raise ValueError("Question Log table header not found in learner-state.md")
+    header_line = header_match.group(0).split("\n")[0]
+    columns = [c.strip() for c in header_line.strip("|").split("|")]
+    return header_match, columns
+
+
+def parse_question_log(path: Path) -> list[dict[str, str]]:
+    """Parse data rows from the `## Question Log` table.
+
+    Returns one dict per data row keyed by header column name. Skips the
+    separator and any malformed lines whose cell count does not match the
+    header. Empty logs (header only) return ``[]``.
+    """
+    text = _read_text(path)
+    try:
+        header_match, columns = _question_log_header(text)
+    except ValueError:
+        return []
+
+    rows: list[dict[str, str]] = []
+    for line in text[header_match.end() :].splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("## "):
+            break
+        if not stripped.startswith("|"):
+            continue
+        if re.match(r"^\|[-| :]+\|$", stripped):
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) != len(columns):
+            continue
+        rows.append(dict(zip(columns, cells)))
+    return rows
+
+
 def append_log_row(path: Path, row: dict[str, Any]) -> None:
     """Append one row to the `## Question Log` table.
 
@@ -321,17 +365,7 @@ def append_log_row(path: Path, row: dict[str, Any]) -> None:
     table. Missing keys default to empty string.
     """
     text = _read_text(path)
-
-    # Find the header row to determine column order
-    header_match = re.search(
-        r"\| Q# \|.*?\|.*?\n\|[-| ]+\|",
-        text,
-    )
-    if not header_match:
-        raise ValueError("Question Log table header not found in learner-state.md")
-
-    header_line = header_match.group(0).split("\n")[0]
-    columns = [c.strip() for c in header_line.strip("|").split("|")]
+    _, columns = _question_log_header(text)
 
     values = [str(row.get(col, "")) for col in columns]
     new_row = "| " + " | ".join(values) + " |"

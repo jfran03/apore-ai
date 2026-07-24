@@ -174,7 +174,14 @@ def select_next_concept(
     weak_only: bool = False,
     allowed_concept_ids: set[str] | None = None,
 ) -> str:
-    """Pick the next concept id for question generation."""
+    """Pick the next concept id for question generation.
+
+    ``mastery`` is BKT-derived P(L) (PROGRESSION.md). Missing keys are treated
+    as never observed (New). Covered threshold remains 0.7.
+
+    Weak-points mode prefers observed-but-not-proficient concepts, then falls
+    back to never-seen / uncovered as before.
+    """
     mastery = mastery or {}
     if (
         requested_id
@@ -194,14 +201,18 @@ def select_next_concept(
     if not nodes:
         return requested_id or "unknown"
 
-    uncovered = [n for n in nodes if mastery.get(n.id, 0.0) < 0.7]
+    def _p(cid: str) -> float:
+        return mastery.get(cid, 0.0)
+
+    uncovered = [n for n in nodes if _p(n.id) < 0.7]
     if weak_only:
-        pool = uncovered
+        observed_weak = [n for n in uncovered if n.id in mastery]
+        pool = observed_weak or uncovered
     else:
         pool = uncovered or list(nodes)
     if not pool:
         return requested_id or "unknown"
-    pool.sort(key=lambda n: (n.depth, n.id))
+    pool.sort(key=lambda n: (_p(n.id), n.depth, n.id))
     return pool[0].id
 
 

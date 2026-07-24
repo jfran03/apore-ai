@@ -76,6 +76,7 @@ export interface SessionStateResponse {
   title: string;
   scalar: number;
   question_count: number;
+  /** BKT-derived P(L); unobserved concepts omitted (not 0). */
   mastery: Record<string, number>;
   knowledge_source: string;
   focus_mode: 'adaptive' | 'weak_points';
@@ -84,6 +85,27 @@ export interface SessionStateResponse {
   active_concept_id?: string | null;
   concept_ids: string[];
   title_pending?: boolean;
+}
+
+export type MasteryBand = 'new' | 'struggling' | 'learning' | 'proficient';
+
+export interface ConceptMastery {
+  p_mastery: number | null;
+  band: MasteryBand;
+  n_observed: number;
+  display_pct: number | null;
+}
+
+export interface LearnerMasteryResponse {
+  knowledge_source: string;
+  params: {
+    p_L0: number;
+    p_T: number;
+    p_G: number;
+    p_S: number;
+    p_F: number;
+  };
+  concepts: Record<string, ConceptMastery>;
 }
 
 export interface ProviderConfig {

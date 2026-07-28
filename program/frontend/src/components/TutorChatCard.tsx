@@ -20,6 +20,7 @@ interface TutorChatCardProps {
   onRevealComplete: () => void;
   phase: 'dialogue' | 'rating' | 'reflection';
   graded: GradeResult | null;
+  tutorMode?: boolean;
   skipPrompt: boolean;
   onSendMessage: (text: string) => void | Promise<void>;
   onSkip: () => void | Promise<void>;
@@ -75,6 +76,7 @@ export function TutorChatCard({
   onRevealComplete,
   phase,
   graded,
+  tutorMode = false,
   skipPrompt,
   onSendMessage,
   onSkip,
@@ -140,6 +142,11 @@ export function TutorChatCard({
         {messages.length === 0 && chatStatus === 'idle' && phase === 'dialogue' && (
           <p className="tutor-chat__hint">
             Type your answer. Say you need help or ask for an explanation to get hints.
+          </p>
+        )}
+        {tutorMode && phase === 'dialogue' && (
+          <p className="tutor-chat__mode-badge" role="status">
+            Tutor mode
           </p>
         )}
         {phase === 'reflection' && chatStatus === 'idle' && (
@@ -208,7 +215,11 @@ export function TutorChatCard({
             className={`signal-capture__verdict signal-capture__verdict--${verdictCorrect ? 'correct' : 'incorrect'}`}
             role="status"
           >
-            {verdictCorrect ? '✓ Correct' : '✗ Incorrect'}
+            {verdictCorrect
+              ? graded?.assisted
+                ? '✓ Correct (with tutor help)'
+                : '✓ Correct'
+              : '✗ Incorrect'}
           </div>
           <p className="signal-capture__rating-prompt">How difficult was this question?</p>
           <div className="signal-capture__controls">

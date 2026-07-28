@@ -59,8 +59,8 @@ def _session_template(
         f"## Mastery\n\n"
         f"## Asked Questions\n\n"
         f"## Question Log\n"
-        f"| Q# | session | date | question_id | concept | question_type | intended_difficulty | explicit_rating | correct | hints | turns | hedging | reward_R | new_difficulty |\n"
-        f"|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
+        f"| Q# | session | date | question_id | concept | question_type | intended_difficulty | explicit_rating | correct | assisted | hints | turns | hedging | reward_R | new_difficulty |\n"
+        f"|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
     )
 
 

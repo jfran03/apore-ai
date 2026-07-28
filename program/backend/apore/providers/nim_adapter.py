@@ -5,8 +5,6 @@ from openai import OpenAI
 from apore.config.llm import get_nim_api_key
 from apore.providers.base import Provider
 
-DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"
-
 
 class NIMProvider(Provider):
     """Calls NVIDIA NIM via the OpenAI-compatible endpoint."""
@@ -33,7 +31,10 @@ class NIMProvider(Provider):
         response = self._client.chat.completions.create(
             model=model,
             messages=all_messages,
-            max_tokens=config.get("max_tokens", 1024),
+            temperature=1,
+            top_p=0.95,
+            max_tokens=16384,
+            stream=False,
         )
         content = response.choices[0].message.content
         return content if content is not None else ""

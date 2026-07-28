@@ -1,8 +1,11 @@
 """API integration tests using FastAPI TestClient."""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from apore.api.app import app
+from apore.runtime import state
 from tests.api.conftest import TEST_KNOWLEDGE_SOURCE
 
 client = TestClient(app)
@@ -195,6 +198,8 @@ def test_wrong_declarative_answer_grades_immediately():
     grade_data = grade_resp.json()
     assert grade_data["phase"] == "graded"
     assert grade_data["correct"] == "no"
+    assert grade_data["mode"] == "answer"
+    assert grade_data["assisted"] is False
     assert grade_data["tutor_message"].startswith("Not quite")
     assert grade_data["hint_count"] == 0
     assert grade_data["turn_count"] == 1
@@ -209,9 +214,75 @@ def test_explicit_help_stays_in_tutor_dialogue():
     assert dialogue_resp.status_code == 200
     dialogue_data = dialogue_resp.json()
     assert dialogue_data["phase"] == "dialogue"
-    assert dialogue_data["tutor_message"]
+    assert dialogue_data["mode"] == "tutor"
+    assert dialogue_data["tutor_message"].startswith("Tutor mode — let's work through this together.")
     assert dialogue_data["question_closed"] is False
 
+
+def test_i_dont_know_routes_to_tutor_without_grading():
+    session_id, _ = _start_session_with_question()
+    dialogue_resp = client.post(
+        f"/sessions/{session_id}/turn",
+        json={"learner_message": "I don't know"},
+    )
+    assert dialogue_resp.status_code == 200
+    dialogue_data = dialogue_resp.json()
+    assert dialogue_data["phase"] == "dialogue"
+    assert dialogue_data["mode"] == "tutor"
+    assert "Tutor mode" in dialogue_data["tutor_message"]
+    assert dialogue_data["question_closed"] is False
+
+    rows = state.parse_question_log(
+        Path(__file__).resolve().parents[2] / "sessions" / f"{session_id}.md"
+    )
+    assert rows == []
+
+
+def test_grade_answer_help_escape_hatches_to_tutor():
+    """Messages the regex misses still escape grade-answer into tutor mode."""
+    session_id, _ = _start_session_with_question()
+    dialogue_resp = client.post(
+        f"/sessions/{session_id}/turn",
+        json={"learner_message": "clarification please on the empty set"},
+    )
+    assert dialogue_resp.status_code == 200
+    dialogue_data = dialogue_resp.json()
+    assert dialogue_data["phase"] == "dialogue"
+    assert dialogue_data["mode"] == "tutor"
+    assert dialogue_data["tutor_message"].startswith(
+        "Tutor mode — let's work through this together."
+    )
+    assert dialogue_data["question_closed"] is False
+
+
+def test_assisted_correct_logs_assisted_yes():
+    session_id, _ = _start_session_with_question()
+    help_resp = client.post(
+        f"/sessions/{session_id}/turn",
+        json={"learner_message": "I need help understanding this question"},
+    )
+    assert help_resp.status_code == 200
+    assert help_resp.json()["phase"] == "dialogue"
+
+    grade_resp = client.post(
+        f"/sessions/{session_id}/turn",
+        json={"learner_message": "the intersection is empty, so they are disjoint"},
+    )
+    assert grade_resp.status_code == 200
+    grade_data = grade_resp.json()
+    assert grade_data["phase"] == "graded"
+    assert grade_data["assisted"] is True
+    assert grade_data["mode"] == "tutor"
+
+    rate_resp = _rate_question(session_id, "ok")
+    assert rate_resp.status_code == 200
+    assert rate_resp.json()["assisted"] is True
+
+    rows = state.parse_question_log(
+        Path(__file__).resolve().parents[2] / "sessions" / f"{session_id}.md"
+    )
+    assert len(rows) == 1
+    assert rows[0]["assisted"] == "yes"
 
 def test_session_question_then_two_phase_turn():
     session_id, q_data = _start_session_with_question()
@@ -352,11 +423,56 @@ def test_get_session_state():
     assert "scalar" in data
     assert data["question_count"] == 1
     assert isinstance(data["mastery"], dict)
+    assert isinstance(data["mastery_delta"], dict)
+    assert data["mastery_delta"]  # one graded question → at least one concept
+    for entry in data["mastery_delta"].values():
+        assert entry["band_before"] in ("new", "struggling", "learning", "proficient")
+        assert entry["band_after"] in ("struggling", "learning", "proficient", "new")
+        assert entry["n_observed_session"] >= 1
+        if entry["band_before"] == "new":
+            assert entry["pct_before"] is None
+        else:
+            assert entry["pct_before"] is not None
+        assert entry["pct_after"] is not None or entry["band_after"] == "new"
     assert data["knowledge_source"] == TEST_KNOWLEDGE_SOURCE
     assert "title" in data
     assert data["max_questions"] == 10
     assert data["focus_mode"] == "adaptive"
     assert data["questions_remaining"] == 9
+
+def test_session_state_mastery_delta_empty_before_grading():
+    session_id, _ = _start_session_with_question()
+    data = client.get(f"/sessions/{session_id}/state").json()
+    assert data["mastery_delta"] == {}
+
+
+def test_end_session_includes_mastery_delta():
+    session_id, _ = _start_session_with_question()
+    client.post(
+        f"/sessions/{session_id}/turn",
+        json={"learner_message": "a collection of distinct elements with no order"},
+    )
+    _rate_question(session_id, "ok")
+    client.post(f"/sessions/{session_id}/turn", json={"continue": True})
+
+    end = client.post(f"/sessions/{session_id}/end")
+    assert end.status_code == 200
+    body = end.json()
+    assert isinstance(body["mastery_delta"], dict)
+    assert body["mastery_delta"]
+    for entry in body["mastery_delta"].values():
+        assert "band_before" in entry
+        assert "band_after" in entry
+        assert "pct_before" in entry
+        assert "pct_after" in entry
+        assert entry["n_observed_session"] >= 1
+
+
+def test_end_session_mastery_delta_empty_with_no_grades():
+    session_id, _ = _start_session_with_question()
+    end = client.post(f"/sessions/{session_id}/end")
+    assert end.status_code == 200
+    assert end.json()["mastery_delta"] == {}
 
 
 def test_config_get():

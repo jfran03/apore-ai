@@ -11,7 +11,12 @@ import {
   getQuestionBank,
   getLearnerMastery,
 } from '../api/client';
-import type { MasteryBand, QuestionResponse, TurnResponse } from '../api/types';
+import type {
+  ConceptMasteryDelta,
+  MasteryBand,
+  QuestionResponse,
+  TurnResponse,
+} from '../api/types';
 import { useActiveDomain } from '../shell/ActiveDomainContext';
 import { useStudyFocus } from '../shell/StudyFocusContext';
 import { QuestionCard } from '../components/QuestionCard';
@@ -23,6 +28,10 @@ import {
 } from '../components/TutorChatCard';
 import type { GradeResult } from '../components/SignalCapture';
 import { ScalarBadge } from '../components/ScalarBadge';
+import {
+  MasteryDeltaList,
+  type MasteryDeltaItem,
+} from '../components/MasteryDeltaList';
 import '../styles/setup.css';
 import '../styles/study.css';
 
@@ -61,6 +70,8 @@ interface SessionState {
   skipPrompt: boolean;
   phase: 'dialogue' | 'rating' | 'reflection';
   graded: GradeResult | null;
+  /** True while Socratic tutor help is active for the open question */
+  tutorMode: boolean;
   ratingContext: {
     question_number: number;
     question_text: string;
@@ -74,15 +85,43 @@ interface SessionState {
     correct: string;
     reward?: number;
   } | null;
+  masteryDelta: Record<string, ConceptMasteryDelta>;
 }
 
 interface SessionCompleteSummary {
   title: string;
   questionsAnswered: number;
   scalar: number;
+  masteryItems: MasteryDeltaItem[];
 }
 
 const LENGTH_PRESETS = [5, 10, 15] as const;
+
+function labelForConcept(
+  conceptId: string,
+  options: ConceptOption[],
+  fallbackLabel?: string | null,
+): string {
+  const fromOptions = options.find((c) => c.concept_id === conceptId);
+  return fromOptions?.label ?? fallbackLabel ?? conceptId;
+}
+
+function masteryItemsFromDelta(
+  delta: Record<string, ConceptMasteryDelta>,
+  options: ConceptOption[],
+  orderHint?: string[],
+): MasteryDeltaItem[] {
+  const ids = orderHint?.filter((id) => id in delta) ?? Object.keys(delta);
+  const seen = new Set(ids);
+  for (const id of Object.keys(delta)) {
+    if (!seen.has(id)) ids.push(id);
+  }
+  return ids.map((concept_id) => ({
+    concept_id,
+    label: labelForConcept(concept_id, options),
+    delta: delta[concept_id],
+  }));
+}
 
 function chapterStudyReady(chapter: {
   has_concept_graph: boolean;
@@ -117,6 +156,7 @@ function gradeFromTurn(res: TurnResponse): GradeResult {
     turn_count: res.turn_count,
     hedging_count: res.hedging_count,
     flag_reason: res.flag_reason,
+    assisted: res.assisted === true,
   };
 }
 
@@ -307,8 +347,10 @@ export function Study() {
           skipPrompt: false,
           phase: 'dialogue',
           graded: null,
+          tutorMode: false,
           ratingContext: null,
           pendingAdvance: null,
+          masteryDelta: state.mastery_delta ?? {},
         };
       });
     } catch (err) {
@@ -347,8 +389,10 @@ export function Study() {
         skipPrompt: false,
         phase: 'dialogue',
         graded: null,
+        tutorMode: false,
         ratingContext: null,
         pendingAdvance: null,
+        masteryDelta: {},
       });
       if (res.title_pending) {
         startTitlePoll(res.session_id);
@@ -495,6 +539,7 @@ export function Study() {
               ...prev,
               phase: res.phase === 'reflection' ? 'reflection' : prev.phase,
               skipPrompt: res.phase === 'skip_prompt',
+              tutorMode: res.mode === 'tutor' || prev.tutorMode,
             };
           });
         });
@@ -519,8 +564,11 @@ export function Study() {
               phase: 'rating',
               graded,
               skipPrompt: false,
+              tutorMode: false,
               ratingContext: ctx,
               currentQuestion: prev.currentQuestion,
+              chatStatus: 'idle',
+              pendingReveal: null,
             };
           });
         };
@@ -618,10 +666,25 @@ export function Study() {
 
       if (turnRes.phase === 'session_complete') {
         stopTitlePoll();
+        let masteryItems: MasteryDeltaItem[] = masteryItemsFromDelta(
+          session.masteryDelta,
+          conceptOptions,
+        );
+        try {
+          const state = await getSessionState(session.sessionId);
+          masteryItems = masteryItemsFromDelta(
+            state.mastery_delta ?? {},
+            conceptOptions,
+            state.concept_ids,
+          );
+        } catch {
+          // Soft-degrade: use last known delta from the session.
+        }
         setSessionComplete({
           title: session.title,
           questionsAnswered: nextHistory.length,
           scalar: nextScalar,
+          masteryItems,
         });
         setSession(null);
         return;
@@ -639,6 +702,7 @@ export function Study() {
           skipPrompt: false,
           phase: 'dialogue',
           graded: null,
+          tutorMode: false,
           ratingContext: null,
           pendingAdvance: null,
           currentQuestion: null,
@@ -647,7 +711,7 @@ export function Study() {
 
       await loadNextQuestion(session.sessionId);
     },
-    [session, loadNextQuestion, stopTitlePoll],
+    [session, loadNextQuestion, stopTitlePoll, conceptOptions],
   );
 
   const handleSubmitRating = useCallback(
@@ -670,6 +734,14 @@ export function Study() {
           reward: turnRes.reward ?? undefined,
         };
 
+        let masteryDelta = session.masteryDelta;
+        try {
+          const state = await getSessionState(session.sessionId);
+          masteryDelta = state.mastery_delta ?? {};
+        } catch {
+          // Keep prior delta if refresh fails.
+        }
+
         setSession((prev) => {
           if (!prev) return prev;
           return {
@@ -680,6 +752,7 @@ export function Study() {
             pendingAdvance,
             skipPrompt: false,
             chatStatus: 'idle',
+            masteryDelta,
           };
         });
       } catch (err) {
@@ -716,12 +789,10 @@ export function Study() {
         <div className="study-start study-complete">
           <h1 className="study-start__heading">Session complete</h1>
           <p className="study-start__sub">{sessionComplete.title}</p>
+          <MasteryDeltaList items={sessionComplete.masteryItems} variant="recap" />
           <div className="study-complete__stats">
             <p>
               Questions answered: <strong>{sessionComplete.questionsAnswered}</strong>
-            </p>
-            <p>
-              Final difficulty: <strong>{sessionComplete.scalar.toFixed(2)}</strong>
             </p>
           </div>
           <button
@@ -1008,6 +1079,8 @@ export function Study() {
     skipPrompt,
     phase,
     graded,
+    tutorMode,
+    masteryDelta,
   } = session;
   const busy = submitLoading || questionLoading || chatStatus !== 'idle';
   const showChat =
@@ -1015,6 +1088,16 @@ export function Study() {
     (Boolean(currentQuestion) || phase === 'rating' || phase === 'reflection');
   const progressNumber =
     currentQuestion?.question_number ?? session.ratingContext?.question_number ?? questionCount;
+  const liveMasteryItems: MasteryDeltaItem[] =
+    currentQuestion && masteryDelta[currentQuestion.concept_id]
+      ? [
+          {
+            concept_id: currentQuestion.concept_id,
+            label: currentQuestion.concept_label,
+            delta: masteryDelta[currentQuestion.concept_id],
+          },
+        ]
+      : [];
 
   return (
     <main className="study-page">
@@ -1050,6 +1133,7 @@ export function Study() {
               onRevealComplete={handleRevealComplete}
               phase={phase}
               graded={graded}
+              tutorMode={tutorMode}
               skipPrompt={skipPrompt}
               onSendMessage={handleSendMessage}
               onSkip={handleSkip}
@@ -1077,6 +1161,9 @@ export function Study() {
             </div>
           </div>
           <ScalarBadge scalar={scalar} label="Difficulty" />
+          {liveMasteryItems.length > 0 && (
+            <MasteryDeltaList items={liveMasteryItems} variant="live" />
+          )}
           <QuestionHistoryCard records={history} />
         </aside>
       </div>

@@ -14,6 +14,7 @@ from apore.runtime.core import (
     QuestionResult,
     finalize_turn,
     generate_question,
+    parse_grade_answer_response,
     run_question_cycle,
     _parse_question_block,
 )
@@ -33,6 +34,81 @@ def test_parse_question_block_direct():
     assert qtype == "apply"
     assert difficulty == pytest.approx(0.7)
     assert "Explain X" in text
+
+
+def test_parse_grade_answer_correct():
+    text, correct, help_request = parse_grade_answer_response(
+        'Correct. Sets have no duplicates.\n{"question_closed": true, "correct": "yes"}'
+    )
+    assert correct is True
+    assert help_request is False
+    assert text.startswith("Correct.")
+
+
+def test_parse_grade_answer_incorrect():
+    text, correct, help_request = parse_grade_answer_response(
+        'Not quite. Order does not matter.\n{"question_closed": true, "correct": "no"}'
+    )
+    assert correct is False
+    assert help_request is False
+    assert text.startswith("Not quite.")
+
+
+def test_parse_grade_answer_help_request():
+    text, correct, help_request = parse_grade_answer_response(
+        'Help request.\n{"help_request": true}'
+    )
+    assert help_request is True
+    assert correct is False
+    assert "Help request" not in text
+
+
+def test_parse_grade_answer_no_verdict_is_help():
+    text, correct, help_request = parse_grade_answer_response(
+        "Let's think about what a set is first. [Source: sets_definition — Definition]"
+    )
+    assert help_request is True
+    assert correct is False
+    assert "set" in text.lower()
+
+
+def test_finalize_turn_writes_assisted_flag(tmp_path: Path):
+    state_path = tmp_path / "learner-state.md"
+    state.initialize(
+        state_path,
+        title="Test",
+        session_id="sess-1",
+        created_at="2026-01-01T00:00:00+00:00",
+        knowledge_source="domain:x/y",
+        focus_mode="adaptive",
+        max_questions=10,
+    )
+    question = GeneratedQuestion(
+        question_number=1,
+        question_id="q-1",
+        concept_id="sets_definition",
+        concept_label="Definition of a Set",
+        question_type="recall",
+        intended_difficulty=0.5,
+        question_text="What is a set?",
+        gen_response="",
+    )
+    assessment = AssessmentResult(
+        correct="yes",
+        hint_count=0,
+        turn_count=1,
+        hedging_count=0,
+    )
+    finalize_turn(
+        session_id="sess-1",
+        question=question,
+        assessment=assessment,
+        explicit_rating="ok",
+        state_path=state_path,
+        assisted=True,
+    )
+    rows = state.parse_question_log(state_path)
+    assert rows[0]["assisted"] == "yes"
 
 
 def test_parse_question_block_protocol_format():

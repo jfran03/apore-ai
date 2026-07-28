@@ -7,7 +7,7 @@ P(L) per concept. No forgetting (P(F) = 0). See PROGRESSION.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Literal
+from typing import Iterable, Literal, Sequence
 
 MasteryBand = Literal["new", "struggling", "learning", "proficient"]
 
@@ -21,6 +21,8 @@ class BKTParams:
     p_G: float = 0.2
     p_S: float = 0.1
     p_F: float = 0.0  # no decay in v1
+    # Inflated guess when the learner reached a correct answer with tutor help.
+    p_G_assisted: float = 0.5
 
 
 DEFAULT_PARAMS = BKTParams()
@@ -59,17 +61,20 @@ def update_step(
     params: BKTParams = DEFAULT_PARAMS,
     *,
     p_S: float | None = None,
+    p_G: float | None = None,
 ) -> float:
     """One BKT update: emission → posterior → learn transition (no forget).
 
     ``obs`` is 1 for correct, 0 for incorrect.
-    Optional ``p_S`` overrides slip for evidence-quality modulation (v1.1).
+    Optional ``p_S`` / ``p_G`` override slip / guess for evidence-quality
+    modulation (assisted answers use a higher guess).
     """
     if obs not in (0, 1):
         raise ValueError(f"obs must be 0 or 1, got {obs!r}")
     slip = params.p_S if p_S is None else p_S
     slip = max(0.0, min(1.0, slip))
-    guess = max(0.0, min(1.0, params.p_G))
+    guess = params.p_G if p_G is None else p_G
+    guess = max(0.0, min(1.0, guess))
     p = max(0.0, min(1.0, p))
 
     p_correct = p * (1.0 - slip) + (1.0 - p) * guess
@@ -90,8 +95,15 @@ def update_step(
 def replay(
     observations: Iterable[int],
     params: BKTParams = DEFAULT_PARAMS,
+    *,
+    assisted: Sequence[bool] | None = None,
 ) -> ConceptMastery:
-    """Replay an ordered sequence of binary observations → final mastery."""
+    """Replay an ordered sequence of binary observations → final mastery.
+
+    When ``assisted`` is provided, assisted *correct* observations use
+    ``params.p_G_assisted`` so tutored answers move mastery less than unaided
+    ones. Assisted incorrect observations are unchanged.
+    """
     obs_list = list(observations)
     if not obs_list:
         return ConceptMastery(
@@ -101,9 +113,21 @@ def replay(
             display_pct=None,
         )
 
+    flags: list[bool]
+    if assisted is None:
+        flags = [False] * len(obs_list)
+    else:
+        flags = list(assisted)
+        if len(flags) != len(obs_list):
+            raise ValueError(
+                f"assisted length {len(flags)} != observations length {len(obs_list)}"
+            )
+
     p = params.p_L0
-    for obs in obs_list:
-        p = update_step(p, obs, params)
+    for obs, was_assisted in zip(obs_list, flags):
+        # Inflate guess only on assisted correct evidence.
+        p_G = params.p_G_assisted if (was_assisted and obs == 1) else None
+        p = update_step(p, obs, params, p_G=p_G)
 
     n = len(obs_list)
     return ConceptMastery(

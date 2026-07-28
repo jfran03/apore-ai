@@ -69,3 +69,21 @@ def test_bands_and_display():
 def test_obs_must_be_binary():
     with pytest.raises(ValueError):
         update_step(0.5, 2)
+
+
+def test_assisted_correct_moves_mastery_less_than_unaided():
+    prior = 0.1
+    unaided = update_step(prior, 1)
+    assisted = update_step(prior, 1, p_G=DEFAULT_PARAMS.p_G_assisted)
+    assert unaided > prior
+    assert assisted > prior
+    assert assisted < unaided
+
+
+def test_replay_assisted_flag_dampens_correct():
+    unaided = replay([1, 1])
+    assisted = replay([1, 1], assisted=[True, True])
+    assert unaided.p_mastery is not None
+    assert assisted.p_mastery is not None
+    assert assisted.p_mastery < unaided.p_mastery
+    assert assisted.p_mastery > 0.0

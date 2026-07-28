@@ -10,6 +10,7 @@ from apore.runtime.state import (
     append_asked_id,
     append_log_row,
     initialize,
+    parse_question_log,
     read_asked_ids,
     read_mastery,
     read_scalar,
@@ -200,11 +201,13 @@ def _sample_row(q_num: int = 1) -> dict:
         "Q#": q_num,
         "session": "s1",
         "date": "2026-01-01",
+        "question_id": f"q-{q_num}",
         "concept": "concept-a",
         "question_type": "recall",
         "intended_difficulty": 0.5,
         "explicit_rating": "easy",
         "correct": "yes",
+        "assisted": "no",
         "hints": 0,
         "turns": 2,
         "hedging": 0,
@@ -215,11 +218,41 @@ def _sample_row(q_num: int = 1) -> dict:
 
 def test_append_single_row(tmp_path: Path):
     p = tmp_path / "learner-state.md"
-    initialize(p)
+    initialize(
+        p,
+        title="Test",
+        session_id="s1",
+        created_at="2026-01-01T00:00:00+00:00",
+        knowledge_source="domain:x/y",
+        focus_mode="adaptive",
+        max_questions=10,
+    )
     append_log_row(p, _sample_row(1))
     text = p.read_text(encoding="utf-8")
     assert "| 1 |" in text
     assert "concept-a" in text
+    rows = parse_question_log(p)
+    assert rows[0]["assisted"] == "no"
+
+
+def test_assisted_column_roundtrip(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    initialize(
+        p,
+        title="Test",
+        session_id="s1",
+        created_at="2026-01-01T00:00:00+00:00",
+        knowledge_source="domain:x/y",
+        focus_mode="adaptive",
+        max_questions=10,
+    )
+    header = p.read_text(encoding="utf-8")
+    assert "| assisted |" in header
+    row = _sample_row(1)
+    row["assisted"] = "yes"
+    append_log_row(p, row)
+    rows = parse_question_log(p)
+    assert rows[0]["assisted"] == "yes"
 
 
 def test_append_multiple_rows(tmp_path: Path):

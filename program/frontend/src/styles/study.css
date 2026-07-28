@@ -242,6 +242,42 @@
   color: var(--color-ink);
 }
 
+.study-concepts__meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.study-concepts__mastery {
+  font-size: var(--font-size-caption);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.study-concepts__mastery--new {
+  color: var(--color-muted-soft);
+}
+
+.study-concepts__mastery--struggling {
+  color: var(--color-ink);
+}
+
+.study-concepts__mastery--learning {
+  color: var(--color-muted);
+}
+
+.study-concepts__mastery--proficient {
+  color: var(--color-semantic-success, #1f8a65);
+}
+
+.study-concepts__sep {
+  font-size: var(--font-size-caption);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  color: var(--color-muted-soft);
+}
+
 .study-concepts__count {
   font-size: var(--font-size-caption);
   color: var(--color-muted);
@@ -368,6 +404,180 @@ button.study-mode-card {
 .study-complete__stats strong {
   color: var(--color-ink);
   font-weight: var(--font-weight-semibold);
+}
+
+.study-complete .mastery-delta {
+  width: min(100%, 420px);
+  text-align: left;
+}
+
+/* ── Mastery delta (session movement) ─────────────────────── */
+
+.mastery-delta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.mastery-delta__heading {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.mastery-delta__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mastery-delta__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  gap: var(--spacing-xs);
+  align-items: baseline;
+  padding: var(--spacing-xs) 0;
+  border-bottom: 1px solid var(--color-hairline);
+  opacity: 0;
+  transform: translateY(6px);
+  animation: mastery-delta-enter 200ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+  animation-delay: calc(var(--mastery-delta-i, 0) * 50ms);
+}
+
+.mastery-delta__row:last-child {
+  border-bottom: none;
+}
+
+.mastery-delta--live .mastery-delta__row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+
+.mastery-delta--live .mastery-delta__bands,
+.mastery-delta--live .mastery-delta__pcts {
+  grid-column: 1;
+}
+
+.mastery-delta__label {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mastery-delta__bands {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-size: var(--font-size-caption);
+}
+
+.mastery-delta__band--origin {
+  color: var(--color-muted-soft);
+}
+
+.mastery-delta__band--new {
+  color: var(--color-muted-soft);
+}
+
+.mastery-delta__band--struggling {
+  color: var(--color-ink);
+}
+
+.mastery-delta__band--learning {
+  color: var(--color-muted);
+}
+
+.mastery-delta__band--proficient {
+  color: var(--color-semantic-success, #1f8a65);
+}
+
+.mastery-delta__arrow {
+  color: var(--color-muted-soft);
+}
+
+.mastery-delta__pcts {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.mastery-delta__empty {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-muted);
+}
+
+.mastery-delta__countdown {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-xs);
+}
+
+.mastery-delta__countdown-track {
+  height: 3px;
+  background-color: var(--color-hairline);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.mastery-delta__countdown-fill {
+  height: 100%;
+  background: color-mix(in srgb, var(--color-ink) 70%, transparent);
+  /* Width driven by JS each frame — linear depletion is intentional. */
+  transition: none;
+}
+
+.mastery-delta__close {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.mastery-delta__close:hover,
+.mastery-delta__close:focus-visible {
+  color: var(--color-ink);
+}
+
+.mastery-delta__compact {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  opacity: 0;
+  animation: mastery-delta-fade 160ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+@keyframes mastery-delta-enter {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mastery-delta-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ── Active session layout ────────────────────────────────── */
@@ -886,6 +1096,20 @@ button.study-mode-card {
   line-height: 1.5;
 }
 
+.tutor-chat__mode-badge {
+  align-self: flex-start;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background-color: var(--color-surface-strong);
+  color: var(--color-ink);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.88px;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
 .tutor-chat__learner {
   margin: 0;
   align-self: flex-end;
@@ -1298,5 +1522,16 @@ button.study-mode-card {
   .tutor-chat__composer-island {
     transition: none !important;
     animation: none !important;
+  }
+
+  .mastery-delta__row {
+    opacity: 1;
+    transform: none;
+    animation: mastery-delta-fade 160ms ease forwards;
+    animation-delay: 0ms;
+  }
+
+  .mastery-delta__compact {
+    animation: mastery-delta-fade 160ms ease forwards;
   }
 }

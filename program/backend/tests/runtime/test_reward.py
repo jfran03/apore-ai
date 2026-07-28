@@ -9,6 +9,24 @@ def test_reward_easy_correct_no_hints():
     assert r == pytest.approx(0.61, abs=1e-6)
 
 
+def test_reward_withholds_zero_hint_bonus_when_assisted():
+    unaided = QuestionSignals("easy", "yes", 0, 0, 2, assisted=False)
+    assisted = QuestionSignals("easy", "yes", 0, 0, 2, assisted=True)
+    assert compute_reward(assisted) < compute_reward(unaided)
+    # Same as dropping the 0.2 * 0.2 = 0.04 hint bonus.
+    assert compute_reward(assisted) == pytest.approx(0.57, abs=1e-6)
+
+
+def test_reward_assisted_does_not_change_hint_penalties():
+    mid = QuestionSignals("ok", "yes", 1, 0, 2, assisted=True)
+    high = QuestionSignals("ok", "yes", 4, 0, 2, assisted=True)
+    assert compute_reward(mid) == pytest.approx(
+        compute_reward(QuestionSignals("ok", "yes", 1, 0, 2)), abs=1e-6
+    )
+    assert compute_reward(high) == pytest.approx(
+        compute_reward(QuestionSignals("ok", "yes", 4, 0, 2)), abs=1e-6
+    )
+
 def test_reward_hard_incorrect_many_hints():
     s = QuestionSignals("hard", "no", 4, 4, 8)
     r = compute_reward(s)

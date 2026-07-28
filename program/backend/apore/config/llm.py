@@ -12,8 +12,8 @@ from apore.runtime.paths import get_program_root
 CONFIG_DIRNAME = ".apore"
 CONFIG_FILENAME = "config.json"
 
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
-DEFAULT_NIM_MODEL = "meta/llama-3.3-70b-instruct"
+DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
+DEFAULT_NIM_MODEL = "deepseek-ai/deepseek-v4-pro"
 
 DEFAULT_MODELS = {
     "anthropic": DEFAULT_ANTHROPIC_MODEL,

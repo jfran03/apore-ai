@@ -101,6 +101,10 @@ class TurnResponse(BaseModel):
     question_number: int
     tutor_message: str | None = None
     question_closed: bool = False
+    mode: Literal["answer", "tutor"] = Field(
+        default="answer",
+        description='"tutor" while Socratic help is active; otherwise "answer"',
+    )
     correct: str = "no"
     hint_count: int = 0
     turn_count: int = 0
@@ -110,6 +114,20 @@ class TurnResponse(BaseModel):
     new_difficulty: float | None = None
     inconsistency_flag: bool = False
     flag_reason: str | None = None
+    assisted: bool = Field(
+        default=False,
+        description="True when the closed question used tutor mode at any point",
+    )
+
+
+class ConceptMasteryDeltaView(BaseModel):
+    """Per-concept mastery movement for the current session."""
+
+    band_before: Literal["new", "struggling", "learning", "proficient"]
+    band_after: Literal["new", "struggling", "learning", "proficient"]
+    pct_before: int | None
+    pct_after: int | None
+    n_observed_session: int
 
 
 class SessionStateResponse(BaseModel):
@@ -117,7 +135,19 @@ class SessionStateResponse(BaseModel):
     title: str
     scalar: float
     question_count: int
-    mastery: dict[str, float]
+    mastery: dict[str, float] = Field(
+        description=(
+            "BKT-derived P(L) per concept with observations for this "
+            "knowledge_source (cross-session). Unobserved concepts omitted."
+        ),
+    )
+    mastery_delta: dict[str, ConceptMasteryDeltaView] = Field(
+        default_factory=dict,
+        description=(
+            "BKT mastery before→after for concepts observed in this session. "
+            "Empty when no graded answers yet."
+        ),
+    )
     knowledge_source: str
     focus_mode: str
     max_questions: int
@@ -129,6 +159,27 @@ class SessionStateResponse(BaseModel):
     ended_at: str | None = None
 
 
+class BKTParamsView(BaseModel):
+    p_L0: float
+    p_T: float
+    p_G: float
+    p_S: float
+    p_F: float
+
+
+class ConceptMasteryView(BaseModel):
+    p_mastery: float | None
+    band: Literal["new", "struggling", "learning", "proficient"]
+    n_observed: int
+    display_pct: int | None
+
+
+class LearnerMasteryResponse(BaseModel):
+    knowledge_source: str
+    params: BKTParamsView
+    concepts: dict[str, ConceptMasteryView]
+
+
 class EndSessionResponse(BaseModel):
     session_id: str
     status: Literal["ended_early"]
@@ -138,7 +189,7 @@ class EndSessionResponse(BaseModel):
     question_count: int
     max_questions: int
     scalar: float
-
+    mastery_delta: dict[str, ConceptMasteryDeltaView] = Field(default_factory=dict)
 
 class ProviderConfigResponse(BaseModel):
     anthropic_api_key_set: bool

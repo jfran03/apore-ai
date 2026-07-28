@@ -16,6 +16,7 @@ class QuestionSignals:
     hint_count: int
     hedging_count: int
     turn_count: int
+    assisted: bool = False
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -30,9 +31,10 @@ def correct_score(correct: Correct) -> float:
     return {"yes": 0.5, "no": -0.5}[correct]
 
 
-def hint_score(hint_count: int) -> float:
+def hint_score(hint_count: int, *, assisted: bool = False) -> float:
     if hint_count == 0:
-        return 0.2
+        # Tutor-mode questions never earn the unaided zero-hint bonus.
+        return 0.0 if assisted else 0.2
     if hint_count <= 2:
         return 0.0
     return -0.2
@@ -63,7 +65,7 @@ def compute_reward(signals: QuestionSignals) -> float:
     r = (
         0.4 * explicit_rating_score(signals.explicit_rating)
         + 0.3 * correct_score(signals.correct)
-        + 0.2 * hint_score(signals.hint_count)
+        + 0.2 * hint_score(signals.hint_count, assisted=signals.assisted)
         + 0.1 * implicit_score(signals)
     )
     return _clamp(r, -1.0, 1.0)

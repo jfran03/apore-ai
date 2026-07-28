@@ -2,29 +2,43 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-## 0. Repository layout (`program/` vs dev root)
+## 0. Repository layout
 
-This folder (`prototype/`) is the **development workspace**: specs (`PRD.md`, `DESIGN.md`), design docs, Cursor/Claude tooling (`.cursor/`, `.agents/`), and this `AGENTS.md` for coding agents.
+This repo root is the **main workspace**: product specs (`PRD.md`, `PRODUCT.md`, `PROGRESSION.md`), design system (`DESIGN.md`), branding, Cursor/Claude tooling (`.cursor/`, `.agents/`), and this `AGENTS.md` for coding agents.
 
-**All runnable Apore prototype code lives under `program/`.** Treat `program/` as the runtime root — anything outside it does not execute as part of the tutor system.
+Two runnable trees sit beside the workspace docs — keep them separate:
 
 | Location | Purpose |
 |----------|---------|
-| `prototype/` (repo root) | Dev environment, research docs, agent rules for building the prototype |
-| `prototype/program/backend/` | **Runs.** Python package, CLI/scripts, protocols, `AGENT.md`, domain skeleton, fixtures manifest, tests |
-| `prototype/program/frontend/` | **Runs.** React/TS client (web + Tauri desktop) |
+| repo root | Workspace: specs, design system, agent rules, research docs |
+| `program/` | **The product.** Runnable Apore tutor — backend + frontend |
+| `marketing-site/` | **apore.ai.** Marketing / waitlist site for the product (not the product itself) |
 
-When implementing Milestone A or later milestones:
+### `program/` — the product
+
+Treat `program/` as the product root. Anything outside it does not execute as part of the tutor system.
+
+- `program/backend/` — Python package, HTTP API, CLI/scripts, protocols, tutor harness (`AGENTS.md`), domain skeleton, fixtures, tests
+- `program/frontend/` — React/TS client (web + Tauri desktop)
+
+When implementing product work:
 
 - Put new Python modules under `program/backend/apore/`.
 - Put `shared/protocols/`, `shared/_templates/`, and session scripts under `program/backend/`.
 - Run tests and CLIs with working directory `program/backend/` (or resolve paths from `program/backend/` as `PROGRAM_ROOT`).
 - Put client code under `program/frontend/`.
-- Do **not** add runtime packages at the prototype root.
+- Do **not** add product runtime packages at the repo root or under `marketing-site/`.
 
-The tutor harness markdown the **runtime** loads is `program/backend/AGENTS.md` (model-agnostic). Root `CLAUDE.md` (`@AGENTS.md`) is for this dev workspace only.
+The tutor harness markdown the **runtime** loads is `program/backend/AGENTS.md` (model-agnostic). Root `CLAUDE.md` (`@AGENTS.md`) is for this workspace only.
 
-See `program/README.md` for what belongs inside the runnable tree.
+See `program/README.md` for what belongs inside the product tree.
+
+### `marketing-site/` — apore.ai
+
+The Next.js site that markets Apore (landing, waitlist, etc.). It is not the tutor product and must not import or depend on `program/` runtime code.
+
+- Work on marketing pages, waitlist APIs, and site copy lives here.
+- See `marketing-site/README.md` (and `marketing-site/AGENTS.md` for Next.js-specific agent notes).
 
 ## 1. Think Before Coding
 
@@ -90,7 +104,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## 5. UI/UX Decision Matrix
 
-All visual and interactive design work in this prototype follows `DESIGN.md` as the canonical design system (colors, typography, spacing, components).
+All visual and interactive design work in this workspace follows `DESIGN.md` as the canonical design system (colors, typography, spacing, components).
 
 **Skill routing — mandatory, no exceptions:**
 

@@ -7,6 +7,7 @@ export interface GradeResult {
   turn_count: number;
   hedging_count: number;
   flag_reason?: string | null;
+  assisted?: boolean;
 }
 
 interface SignalCaptureProps {

@@ -81,6 +81,11 @@ _GRADE_CORRECT = (
     '{"question_closed": true, "correct": "yes"}'
 )
 
+_GRADE_HELP = (
+    "Help request.\n"
+    '{"help_request": true}'
+)
+
 _SIGNALS = {
     "explicit_rating": "ok",
     "correct": "yes",
@@ -153,6 +158,18 @@ class StubProvider(Provider):
             return _TUTOR_HINT
         if protocol == "grade-answer":
             last_user = _last_user_message(messages).lower()
+            if any(
+                phrase in last_user
+                for phrase in (
+                    "i don't know",
+                    "i dont know",
+                    "no idea",
+                    "walk me through",
+                    "explain this",
+                    "clarification please",
+                )
+            ):
+                return _GRADE_HELP
             if "list" in last_user:
                 return _GRADE_WRONG
             return _GRADE_CORRECT

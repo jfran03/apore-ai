@@ -277,12 +277,19 @@ def _weak_concept_ids(
     *,
     allowed_concept_ids: set[str] | None = None,
 ) -> list[str]:
-    return sorted(
-        n.id
+    """Concept ids with P(L) < 0.7 (observed weak first, then never-seen)."""
+    allowed = [
+        n
         for n in graph.nodes.values()
-        if _concept_allowed(n.id, allowed_concept_ids)
-        and mastery.get(n.id, 0.0) < 0.7
+        if _concept_allowed(n.id, allowed_concept_ids) and mastery.get(n.id, 0.0) < 0.7
+    ]
+    observed_weak = sorted(
+        (n.id for n in allowed if n.id in mastery),
+        key=lambda cid: (mastery.get(cid, 0.0), cid),
     )
+    if observed_weak:
+        return observed_weak
+    return sorted(n.id for n in allowed)
 
 
 def select_question(

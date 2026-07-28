@@ -60,6 +60,8 @@ export interface TurnResponse {
   question_number: number;
   tutor_message?: string | null;
   question_closed?: boolean;
+  /** "tutor" while Socratic help is active; otherwise "answer" */
+  mode?: 'answer' | 'tutor';
   correct: string;
   hint_count: number;
   turn_count: number;
@@ -69,6 +71,8 @@ export interface TurnResponse {
   new_difficulty?: number | null;
   inconsistency_flag: boolean;
   flag_reason?: string | null;
+  /** True when the closed question used tutor mode at any point */
+  assisted?: boolean;
 }
 
 export interface SessionStateResponse {
@@ -76,7 +80,10 @@ export interface SessionStateResponse {
   title: string;
   scalar: number;
   question_count: number;
+  /** BKT-derived P(L); unobserved concepts omitted (not 0). */
   mastery: Record<string, number>;
+  /** Mastery before→after for concepts observed in this session. */
+  mastery_delta?: Record<string, ConceptMasteryDelta>;
   knowledge_source: string;
   focus_mode: 'adaptive' | 'weak_points';
   max_questions: number;
@@ -84,6 +91,35 @@ export interface SessionStateResponse {
   active_concept_id?: string | null;
   concept_ids: string[];
   title_pending?: boolean;
+}
+
+export type MasteryBand = 'new' | 'struggling' | 'learning' | 'proficient';
+
+export interface ConceptMastery {
+  p_mastery: number | null;
+  band: MasteryBand;
+  n_observed: number;
+  display_pct: number | null;
+}
+
+export interface ConceptMasteryDelta {
+  band_before: MasteryBand;
+  band_after: MasteryBand;
+  pct_before: number | null;
+  pct_after: number | null;
+  n_observed_session: number;
+}
+
+export interface LearnerMasteryResponse {
+  knowledge_source: string;
+  params: {
+    p_L0: number;
+    p_T: number;
+    p_G: number;
+    p_S: number;
+    p_F: number;
+  };
+  concepts: Record<string, ConceptMastery>;
 }
 
 export interface ProviderConfig {
@@ -304,4 +340,5 @@ export interface EndSessionResponse {
   question_count: number;
   max_questions: number;
   scalar: number;
+  mastery_delta?: Record<string, ConceptMasteryDelta>;
 }

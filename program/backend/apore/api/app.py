@@ -16,8 +16,11 @@ from apore.api.schemas import (
     AddUrlSourceRequest,
     BatchRunRequest,
     BatchRunResponse,
+    BKTParamsView,
     ChapterArtifactStatus,
     CompileStatus,
+    ConceptMasteryDeltaView,
+    ConceptMasteryView,
     ConceptOrderRequest,
     CreateChapterRequest,
     CreateDomainRequest,
@@ -28,6 +31,7 @@ from apore.api.schemas import (
     EndSessionResponse,
     FixtureFetchResponse,
     KnowledgeCatalogResponse,
+    LearnerMasteryResponse,
     ProviderConfigResponse,
     ProviderConfigUpdate,
     QuestionBankEntry,
@@ -59,10 +63,18 @@ from apore.fixtures.loader import load_manifest
 from apore.knowledge.chapter import ChapterContext, load_concept_graph, resolve_chapter
 from apore.providers import get_provider
 from apore.runtime import state
+from apore.runtime.bkt import DEFAULT_PARAMS
+from apore.runtime.mastery import (
+    ConceptMasteryDelta,
+    derive_mastery,
+    derive_mastery_delta,
+    derive_mastery_floats,
+)
 from apore.runtime.core import (
     AssessmentResult,
     GeneratedQuestion,
     GradingResult,
+    TUTOR_MODE_NOTICE,
     assess_response,
     finalize_turn,
     generate_question,
@@ -126,6 +138,7 @@ class PendingGrading:
     assessment: AssessmentResult
     # Future multi-turn Socratic: append Teacher/learner turns before assess_response.
     dialogue_transcript: list[dict[str, str]] = field(default_factory=list)
+    assisted: bool = False
 
 
 @dataclass
@@ -136,6 +149,7 @@ class ReflectionState:
     assessment: AssessmentResult
     grading: GradingResult
     transcript: list[dict[str, str]] = field(default_factory=list)
+    assisted: bool = False
 
 
 @dataclass
@@ -262,14 +276,50 @@ def _resolve_session_concept_ids(
     return [cid for cid in graph.ordered_ids() if cid in available_set]
 
 
+def _mastery_delta_views(
+    deltas: dict[str, ConceptMasteryDelta],
+) -> dict[str, ConceptMasteryDeltaView]:
+    return {
+        cid: ConceptMasteryDeltaView(
+            band_before=d.before.band,
+            band_after=d.after.band,
+            pct_before=d.before.display_pct,
+            pct_after=d.after.display_pct,
+            n_observed_session=d.n_observed_session,
+        )
+        for cid, d in deltas.items()
+    }
+
+
+def _session_mastery_delta(sess: SessionState) -> dict[str, ConceptMasteryDeltaView]:
+    graph = load_concept_graph(sess.chapter)
+    concept_ids = graph.ordered_ids() or list(sess.concept_ids)
+    return _mastery_delta_views(
+        derive_mastery_delta(
+            SESSIONS_DIR,
+            sess.knowledge_source,
+            sess.session_id,
+            concept_ids,
+        )
+    )
+
+
 def _session_state_response(sess: SessionState) -> SessionStateResponse:
     remaining = max(0, sess.max_questions - sess.question_count)
+    graph = load_concept_graph(sess.chapter)
+    concept_ids = graph.ordered_ids() or list(sess.concept_ids)
+    mastery = derive_mastery_floats(
+        SESSIONS_DIR,
+        sess.knowledge_source,
+        concept_ids,
+    )
     return SessionStateResponse(
         session_id=sess.session_id,
         title=sess.title,
         scalar=state.read_scalar(sess.state_path),
         question_count=sess.question_count,
-        mastery=state.read_mastery(sess.state_path),
+        mastery=mastery,
+        mastery_delta=_session_mastery_delta(sess),
         knowledge_source=sess.knowledge_source,
         focus_mode=sess.focus_mode,
         max_questions=sess.max_questions,
@@ -536,6 +586,7 @@ def _grade_pending_dialogue(
         (m["content"] for m in reversed(transcript) if m["role"] == "user"),
         "",
     )
+    assisted = sess.tutor_mode
     assessment = assess_response(
         question=pending,
         learner_response=last_user,
@@ -552,6 +603,7 @@ def _grade_pending_dialogue(
         learner_response=last_user,
         assessment=assessment,
         dialogue_transcript=transcript,
+        assisted=assisted,
     )
     sess.pending_question = None
     sess.active_transcript = []
@@ -560,11 +612,13 @@ def _grade_pending_dialogue(
         phase="graded",
         question_number=pending.question_number,
         tutor_message=tutor_message,
+        mode="tutor" if assisted else "answer",
         correct=assessment.correct,
         hint_count=assessment.hint_count,
         turn_count=assessment.turn_count,
         hedging_count=assessment.hedging_count,
         flag_reason=assessment.flag_reason,
+        assisted=assisted,
     )
 
 
@@ -574,11 +628,14 @@ def _turn_response_from_grading(
     grading: GradingResult,
     flag_reason: str | None = None,
     tutor_message: str | None = None,
+    mode: str = "answer",
+    assisted: bool = False,
 ) -> TurnResponse:
     return TurnResponse(
         phase=phase,
         question_number=grading.question_number,
         tutor_message=tutor_message,
+        mode=mode,  # type: ignore[arg-type]
         explicit_rating=grading.explicit_rating,
         correct=grading.correct,
         hint_count=grading.hint_count,
@@ -588,6 +645,7 @@ def _turn_response_from_grading(
         new_difficulty=grading.new_difficulty,
         inconsistency_flag=grading.inconsistency_flag,
         flag_reason=flag_reason,
+        assisted=assisted,
     )
 
 
@@ -601,12 +659,15 @@ def _enter_reflection(
         assessment=pending_grade.assessment,
         grading=grading,
         transcript=list(pending_grade.dialogue_transcript),
+        assisted=pending_grade.assisted,
     )
     sess.tutor_mode = True
     return _turn_response_from_grading(
         phase="reflection",
         grading=grading,
         flag_reason=pending_grade.assessment.flag_reason,
+        mode="tutor",
+        assisted=pending_grade.assisted,
     )
 
 
@@ -814,6 +875,12 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
     question_number = sess.question_count + 1
     metadata = _build_metadata(sess)
     allowed = set(sess.concept_ids) if sess.concept_ids else None
+    graph = load_concept_graph(sess.chapter)
+    mastery = derive_mastery_floats(
+        SESSIONS_DIR,
+        sess.knowledge_source,
+        graph.ordered_ids() or list(sess.concept_ids),
+    )
 
     try:
         generated = generate_question(
@@ -827,6 +894,7 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
             config={},
             metadata=metadata,
             program_root=PROGRAM_ROOT,
+            mastery=mastery,
             asked_ids=sess.asked_question_ids,
             focus_mode=sess.focus_mode,
             last_concept_id=sess.active_concept_id,
@@ -904,6 +972,7 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
             phase=phase,
             grading=grading,
             flag_reason=reflection.assessment.flag_reason,
+            assisted=reflection.assisted,
         )
 
     if has_rating:
@@ -926,6 +995,7 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
             assessment=pending_grade.assessment,
             explicit_rating=rating_raw,  # type: ignore[arg-type]
             state_path=sess.state_path,
+            assisted=pending_grade.assisted,
         )
         sess.pending_grading = None
         sess.scalar = grading.new_difficulty
@@ -991,6 +1061,8 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
             grading=reflection.grading,
             flag_reason=reflection.assessment.flag_reason,
             tutor_message=turn.tutor_message,
+            mode="tutor",
+            assisted=reflection.assisted,
         )
 
     # Dialogue message
@@ -1014,7 +1086,10 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
             sess, provider=provider, model=model, tutor_message=ack
         )
 
+    entered_tutor = False
     if is_help_request(learner_message):
+        if not sess.tutor_mode:
+            entered_tutor = True
         sess.tutor_mode = True
 
     sess.active_transcript.append({"role": "user", "content": learner_message})
@@ -1031,21 +1106,25 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
             config={},
             program_root=PROGRAM_ROOT,
         )
-        sess.active_transcript.append({"role": "assistant", "content": turn.tutor_message})
+        tutor_message = turn.tutor_message
+        if entered_tutor:
+            tutor_message = f"{TUTOR_MODE_NOTICE}\n\n{tutor_message}"
+        sess.active_transcript.append({"role": "assistant", "content": tutor_message})
 
         if turn.question_closed:
             return _grade_pending_dialogue(
                 sess,
                 provider=provider,
                 model=model,
-                tutor_message=turn.tutor_message,
+                tutor_message=tutor_message,
             )
 
         return TurnResponse(
             phase="dialogue",
             question_number=pending.question_number,
-            tutor_message=turn.tutor_message,
+            tutor_message=tutor_message,
             question_closed=False,
+            mode="tutor",
         )
 
     grade = grade_answer_turn(
@@ -1059,6 +1138,40 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
         config={},
         program_root=PROGRAM_ROOT,
     )
+
+    if grade.help_request:
+        sess.tutor_mode = True
+        # Discard the escape-marker reply; re-run under tutor-turn rules.
+        turn = tutor_turn(
+            question=pending,
+            dialogue_transcript=sess.active_transcript[:-1],
+            learner_message=learner_message,
+            chapter=sess.chapter,
+            state_path=sess.state_path,
+            provider=provider,
+            model=model,
+            config={},
+            program_root=PROGRAM_ROOT,
+        )
+        tutor_message = f"{TUTOR_MODE_NOTICE}\n\n{turn.tutor_message}"
+        sess.active_transcript.append({"role": "assistant", "content": tutor_message})
+
+        if turn.question_closed:
+            return _grade_pending_dialogue(
+                sess,
+                provider=provider,
+                model=model,
+                tutor_message=tutor_message,
+            )
+
+        return TurnResponse(
+            phase="dialogue",
+            question_number=pending.question_number,
+            tutor_message=tutor_message,
+            question_closed=False,
+            mode="tutor",
+        )
+
     sess.active_transcript.append({"role": "assistant", "content": grade.tutor_message})
     return _grade_pending_dialogue(
         sess,
@@ -1072,6 +1185,44 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
 def get_session_state(session_id: str) -> SessionStateResponse:
     sess = _get_session(session_id)
     return _session_state_response(sess)
+
+
+@app.get("/learner/mastery", response_model=LearnerMasteryResponse)
+def get_learner_mastery(knowledge_source: str) -> LearnerMasteryResponse:
+    """Derive-on-read BKT mastery for all concepts in a chapter."""
+    source = (knowledge_source or "").strip()
+    if not source:
+        raise HTTPException(status_code=400, detail="knowledge_source is required")
+    try:
+        chapter = resolve_chapter(source, PROGRAM_ROOT)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    graph = load_concept_graph(chapter)
+    concept_ids = graph.ordered_ids()
+    derived = derive_mastery(SESSIONS_DIR, chapter.knowledge_source, concept_ids)
+    params = DEFAULT_PARAMS
+    return LearnerMasteryResponse(
+        knowledge_source=chapter.knowledge_source,
+        params=BKTParamsView(
+            p_L0=params.p_L0,
+            p_T=params.p_T,
+            p_G=params.p_G,
+            p_S=params.p_S,
+            p_F=params.p_F,
+        ),
+        concepts={
+            cid: ConceptMasteryView(
+                p_mastery=m.p_mastery,
+                band=m.band,
+                n_observed=m.n_observed,
+                display_pct=m.display_pct,
+            )
+            for cid, m in derived.items()
+        },
+    )
 
 
 @app.post("/sessions/{session_id}/end", response_model=EndSessionResponse)
@@ -1089,6 +1240,7 @@ def end_session(session_id: str) -> EndSessionResponse:
             question_count=sess.question_count,
             max_questions=sess.max_questions,
             scalar=state.read_scalar(sess.state_path),
+            mastery_delta=_session_mastery_delta(sess),
         )
     if sess.status != "active":
         raise HTTPException(
@@ -1105,6 +1257,7 @@ def end_session(session_id: str) -> EndSessionResponse:
         question_count=sess.question_count,
         max_questions=sess.max_questions,
         scalar=state.read_scalar(sess.state_path),
+        mastery_delta=_session_mastery_delta(sess),
     )
 
 

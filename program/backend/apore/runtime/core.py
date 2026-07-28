@@ -69,6 +69,7 @@ class TutorTurnResult:
 class GradeAnswerTurnResult:
     tutor_message: str
     correct: bool
+    help_request: bool = False
 
 
 @dataclass
@@ -243,6 +244,9 @@ _TUTOR_CLOSE_PATTERN = re.compile(r"Yes, exactly\s*[—\-]", re.IGNORECASE)
 
 _GRADE_CORRECT_PATTERN = re.compile(r"^Correct\.", re.IGNORECASE | re.MULTILINE)
 _GRADE_INCORRECT_PATTERN = re.compile(r"^Not quite\.", re.IGNORECASE | re.MULTILINE)
+_GRADE_HELP_PATTERN = re.compile(r"^Help request\.", re.IGNORECASE | re.MULTILINE)
+
+TUTOR_MODE_NOTICE = "Tutor mode — let's work through this together."
 
 _SKIP_PROMPT = (
     "Before we move on — briefly, why do you want to skip this question?"
@@ -272,10 +276,19 @@ def parse_tutor_response(raw: str) -> tuple[str, bool]:
     return text.strip(), question_closed
 
 
-def parse_grade_answer_response(raw: str) -> tuple[str, bool]:
-    """Strip JSON trailer and determine correctness from grade-answer response."""
+def parse_grade_answer_response(raw: str) -> tuple[str, bool, bool]:
+    """Strip JSON trailer; return (text, correct, help_request).
+
+    When the model emits neither a graded verdict nor a help marker, treat the
+    reply as a help request rather than defaulting to incorrect.
+    """
     text = _strip_code_fence((raw or "").strip())
-    correct = bool(_GRADE_CORRECT_PATTERN.search(text))
+    has_correct = bool(_GRADE_CORRECT_PATTERN.search(text))
+    has_incorrect = bool(_GRADE_INCORRECT_PATTERN.search(text))
+    has_help = bool(_GRADE_HELP_PATTERN.search(text))
+    correct = has_correct
+    help_request = has_help
+    trailer_correct: str | None = None
 
     json_obj = _find_json_object(text)
     if json_obj:
@@ -284,15 +297,25 @@ def parse_grade_answer_response(raw: str) -> tuple[str, bool]:
         except json.JSONDecodeError:
             parsed = None
         if isinstance(parsed, dict):
+            if parsed.get("help_request") is True:
+                help_request = True
             trailer_correct = parsed.get("correct")
             if trailer_correct in ("yes", "no"):
                 correct = trailer_correct == "yes"
             text = text.replace(json_obj, "").strip()
 
-    if _GRADE_INCORRECT_PATTERN.search(text):
+    if has_incorrect:
         correct = False
 
-    return text.strip(), correct
+    if help_request:
+        text = _GRADE_HELP_PATTERN.sub("", text, count=1).strip()
+        return text, False, True
+
+    # Safety net: helpful prose without a grade verdict is a help request.
+    if not has_correct and not has_incorrect and trailer_correct not in ("yes", "no"):
+        return text.strip(), False, True
+
+    return text.strip(), correct, False
 
 
 def skip_prompt_message() -> str:
@@ -367,8 +390,12 @@ def grade_answer_turn(
         model,
         {**config, "protocol": "grade-answer"},
     )
-    tutor_message, correct = parse_grade_answer_response(raw)
-    return GradeAnswerTurnResult(tutor_message=tutor_message, correct=correct)
+    tutor_message, correct, help_request = parse_grade_answer_response(raw)
+    return GradeAnswerTurnResult(
+        tutor_message=tutor_message,
+        correct=correct,
+        help_request=help_request,
+    )
 
 
 def _build_grade_messages(
@@ -406,7 +433,17 @@ def generate_question(
     """Select from question bank when present; otherwise fall back to LLM generation."""
     graph = load_concept_graph(chapter)
     scalar = state.read_scalar(state_path)
-    mastery_map = mastery if mastery is not None else state.read_mastery(state_path)
+    if mastery is not None:
+        mastery_map = mastery
+    else:
+        # Derive-on-read BKT from cross-session logs (PROGRESSION.md).
+        from apore.runtime.mastery import derive_mastery_floats
+
+        meta = state.read_session_meta(state_path)
+        ks = meta.get("knowledge_source") or ""
+        mastery_map = (
+            derive_mastery_floats(program_root / "sessions", ks) if ks else {}
+        )
     asked = asked_ids if asked_ids is not None else state.read_asked_ids(state_path)
     bank = load_question_bank(chapter)
 
@@ -544,6 +581,7 @@ def finalize_turn(
     assessment: AssessmentResult,
     explicit_rating: Rating,
     state_path: Path,
+    assisted: bool = False,
 ) -> GradingResult:
     """Apply learner difficulty rating, compute reward, log, and update scalar."""
     inconsistency, _reason = _signals_inconsistency(
@@ -557,6 +595,7 @@ def finalize_turn(
         hint_count=assessment.hint_count,
         hedging_count=assessment.hedging_count,
         turn_count=assessment.turn_count,
+        assisted=assisted,
     )
     reward = compute_reward(signals_obj)
     new_difficulty = update_difficulty(state.read_scalar(state_path), reward)
@@ -573,6 +612,7 @@ def finalize_turn(
             "intended_difficulty": question.intended_difficulty,
             "explicit_rating": explicit_rating,
             "correct": assessment.correct,
+            "assisted": "yes" if assisted else "no",
             "hints": assessment.hint_count,
             "turns": assessment.turn_count,
             "hedging": assessment.hedging_count,
@@ -581,14 +621,8 @@ def finalize_turn(
         },
     )
     state.write_scalar(state_path, new_difficulty)
-
-    mastery = state.read_mastery(state_path)
-    current = mastery.get(question.concept_id, 0.0)
-    if assessment.correct == "yes":
-        mastery[question.concept_id] = min(1.0, current + 0.15)
-    else:
-        mastery[question.concept_id] = max(0.0, current - 0.1)
-    state.write_mastery(state_path, mastery)
+    # Per-concept mastery is derive-on-read BKT over question logs
+    # (PROGRESSION.md). Do not write the legacy ## Mastery heuristic map.
 
     return GradingResult(
         question_number=question.question_number,

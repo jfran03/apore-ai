@@ -9,3 +9,7 @@ dist/
 frontend/node_modules/
 frontend/dist/
 .apore/
+backend/sessions/*
+!backend/sessions/.gitkeep
+!backend/sessions/_bank_gen.md
+.DS_Store

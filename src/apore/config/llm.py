@@ -30,6 +30,7 @@ class LLMConfig:
     anthropic_api_key: str | None = None
     nim_api_key: str | None = None
     model: str = ""
+    function_id: str = ""
 
 
 @dataclass
@@ -76,6 +77,7 @@ def load_llm_config(program_root: Path | None = None) -> LLMConfig:
     anthropic_api_key = _clean_key(data.get("anthropic_api_key"))
     nim_api_key = _clean_key(data.get("nim_api_key"))
     model = _clean_model(data.get("model"))
+    function_id = _clean_key(data.get("function_id"))
 
     if anthropic_api_key is None:
         anthropic_api_key = _clean_key(os.environ.get("ANTHROPIC_API_KEY"))
@@ -86,6 +88,7 @@ def load_llm_config(program_root: Path | None = None) -> LLMConfig:
         anthropic_api_key=anthropic_api_key,
         nim_api_key=nim_api_key,
         model=model,
+        function_id=function_id,
     )
 
 
@@ -156,6 +159,7 @@ def get_provider_config(program_root: Path | None = None) -> dict:
         resolved = resolve_active(config)
         active_provider = resolved.provider_name
         active_model = resolved.model
+        function_id = config.function_id
     except NoLLMConfigured:
         active_provider = None
         active_model = None
@@ -167,6 +171,7 @@ def get_provider_config(program_root: Path | None = None) -> dict:
         "model": config.model,
         "active_provider": active_provider,
         "active_model": active_model,
+        "function_id": function_id
     }
 
 

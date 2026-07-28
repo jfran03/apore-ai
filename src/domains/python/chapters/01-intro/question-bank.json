@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "python-recall-01",
+      "concept_id": "python",
+      "type": "recall",
+      "intended_difficulty": 0.2,
+      "text": "What is the primary design goal of the Python programming language?"
+    },
+    {
+      "id": "python-recall-02",
+      "concept_id": "python",
+      "type": "recall",
+      "intended_difficulty": 0.3,
+      "text": "What programming approach does Python support, allowing for organized and reusable code?"
+    },
+    {
+      "id": "python-apply-01",
+      "concept_id": "python",
+      "type": "apply",
+      "intended_difficulty": 0.4,
+      "text": "How would you utilize Python's readability feature to make your code more understandable for a team of developers with varying levels of experience?"
+    },
+    {
+      "id": "python-apply-02",
+      "concept_id": "python",
+      "type": "apply",
+      "intended_difficulty": 0.6,
+      "text": "Suppose you are tasked with creating a simple application using Python. Describe how you would leverage Python's object-oriented programming capabilities to structure your code."
+    },
+    {
+      "id": "python-synthesis-01",
+      "concept_id": "python",
+      "type": "synthesis",
+      "intended_difficulty": 0.7,
+      "text": "Consider a scenario where you need to choose between Python and another programming language for a project. How would you evaluate the trade-offs between Python's versatility and the specific requirements of your project?"
+    },
+    {
+      "id": "python-synthesis-02",
+      "concept_id": "python",
+      "type": "synthesis",
+      "intended_difficulty": 0.85,
+      "text": "Imagine you are designing a curriculum for teaching programming to beginners. How would you incorporate Python's features, such as readability and support for object-oriented programming, to create an effective learning pathway?"
+    },
+    {
+      "id": "readme-recall-01",
+      "concept_id": "readme",
+      "type": "recall",
+      "intended_difficulty": 0.2,
+      "text": "What is the purpose of the Readme file in a chapter?"
+    },
+    {
+      "id": "readme-recall-02",
+      "concept_id": "readme",
+      "type": "recall",
+      "intended_difficulty": 0.3,
+      "text": "What types of files can be dropped into the Readme folder for processing?"
+    },
+    {
+      "id": "readme-apply-01",
+      "concept_id": "readme",
+      "type": "apply",
+      "intended_difficulty": 0.4,
+      "text": "How would you use the information in a Readme file to determine the structure of a chapter?"
+    },
+    {
+      "id": "readme-apply-02",
+      "concept_id": "readme",
+      "type": "apply",
+      "intended_difficulty": 0.6,
+      "text": "Suppose you are tasked with creating a new chapter. Describe how you would utilize the Readme file to guide your content creation."
+    },
+    {
+      "id": "readme-synthesis-01",
+      "concept_id": "readme",
+      "type": "synthesis",
+      "intended_difficulty": 0.7,
+      "text": "Consider a scenario where the Readme file is missing from a chapter. How would you infer the chapter's organization and key points based on the available content?"
+    },
+    {
+      "id": "readme-synthesis-02",
+      "concept_id": "readme",
+      "type": "synthesis",
+      "intended_difficulty": 0.85,
+      "text": "Design a system for automatically generating a Readme file based on the content and structure of a chapter. What information would you need, and how would you present it?"
+    }
+  ]
+}

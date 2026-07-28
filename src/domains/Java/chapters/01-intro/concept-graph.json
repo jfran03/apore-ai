@@ -1,0 +1,17 @@
+{
+  "nodes": [
+    {
+      "id": "readme",
+      "label": "Readme",
+      "source_file": "README.md",
+      "depth": 0
+    },
+    {
+      "id": "recording",
+      "label": "Recording",
+      "source_file": "Recording.mp4",
+      "depth": 0
+    }
+  ],
+  "edges": []
+}

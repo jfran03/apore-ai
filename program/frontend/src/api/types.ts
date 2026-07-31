@@ -122,6 +122,39 @@ export interface LearnerMasteryResponse {
   concepts: Record<string, ConceptMastery>;
 }
 
+export interface GraphConcept {
+  id: string;
+  label: string;
+  depth: number;
+  p_mastery: number | null;
+  band: MasteryBand;
+  n_observed: number;
+  display_pct: number | null;
+  has_wiki: boolean;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relation: string;
+}
+
+export interface GraphChapter {
+  id: string;
+  knowledge_source: string;
+  has_concept_graph: boolean;
+  mastery_pct: number;
+  concepts_proficient: number;
+  concepts_total: number;
+  concepts: GraphConcept[];
+  edges: GraphEdge[];
+}
+
+export interface DomainGraph {
+  domain_id: string;
+  chapters: GraphChapter[];
+}
+
 export interface ProviderConfig {
   anthropic_api_key_set: boolean;
   anthropic_api_key_hint: string | null;

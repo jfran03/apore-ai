@@ -180,6 +180,33 @@ class LearnerMasteryResponse(BaseModel):
     concepts: dict[str, ConceptMasteryView]
 
 
+class GraphConceptView(BaseModel):
+    id: str
+    label: str
+    depth: int
+    p_mastery: float | None
+    band: Literal["new", "struggling", "learning", "proficient"]
+    n_observed: int
+    display_pct: int | None
+    has_wiki: bool
+
+
+class GraphChapterView(BaseModel):
+    id: str
+    knowledge_source: str
+    has_concept_graph: bool
+    mastery_pct: int
+    concepts_proficient: int
+    concepts_total: int
+    concepts: list[GraphConceptView]
+    edges: list[dict]
+
+
+class DomainGraphResponse(BaseModel):
+    domain_id: str
+    chapters: list[GraphChapterView]
+
+
 class EndSessionResponse(BaseModel):
     session_id: str
     status: Literal["ended_early"]

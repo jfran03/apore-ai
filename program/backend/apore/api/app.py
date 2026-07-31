@@ -24,6 +24,9 @@ from apore.api.schemas import (
     ConceptOrderRequest,
     CreateChapterRequest,
     CreateDomainRequest,
+    DomainGraphResponse,
+    GraphChapterView,
+    GraphConceptView,
     RenameChapterRequest,
     RenameDomainRequest,
     CreateSessionRequest,
@@ -60,7 +63,12 @@ from apore.config.llm import (
 )
 from apore.fixtures.aliases import fixture_to_domain_chapter
 from apore.fixtures.loader import load_manifest
-from apore.knowledge.chapter import ChapterContext, load_concept_graph, resolve_chapter
+from apore.knowledge.chapter import (
+    ChapterContext,
+    load_concept_graph,
+    resolve_chapter,
+    resolve_wiki_page,
+)
 from apore.providers import get_provider
 from apore.runtime import state
 from apore.runtime.bkt import DEFAULT_PARAMS
@@ -1223,6 +1231,83 @@ def get_learner_mastery(knowledge_source: str) -> LearnerMasteryResponse:
             for cid, m in derived.items()
         },
     )
+
+
+@app.get("/domains/{domain_id}/graph", response_model=DomainGraphResponse)
+def get_domain_graph(domain_id: str) -> DomainGraphResponse:
+    """Domain-level knowledge graph: chapters, concepts, prerequisite edges,
+    and derive-on-read BKT mastery per concept. Read-only; adds no storage."""
+    try:
+        validate_id(domain_id, "domain_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    chapters_dir = PROGRAM_ROOT / "domains" / domain_id / "chapters"
+    if not chapters_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    chapters: list[GraphChapterView] = []
+    for chapter_path in sorted(chapters_dir.iterdir()):
+        if not chapter_path.is_dir():
+            continue
+        chapter_id = chapter_path.name
+        knowledge_source = f"domain:{domain_id}/{chapter_id}"
+        chapter = resolve_chapter(knowledge_source, PROGRAM_ROOT)
+        graph = load_concept_graph(chapter)
+        ordered_ids = graph.ordered_ids()
+        derived = derive_mastery(SESSIONS_DIR, knowledge_source, ordered_ids)
+
+        concepts: list[GraphConceptView] = []
+        proficient = 0
+        mastery_sum = 0.0
+        for cid in ordered_ids:
+            node = graph.get(cid)
+            mastery = derived[cid]
+            if mastery.band == "proficient":
+                proficient += 1
+            mastery_sum += mastery.p_mastery or 0.0
+            wiki_page = resolve_wiki_page(
+                chapter.wiki_dir, cid, node.source_file if node else None
+            )
+            concepts.append(
+                GraphConceptView(
+                    id=cid,
+                    label=graph.label_for(cid),
+                    depth=node.depth if node else 0,
+                    p_mastery=mastery.p_mastery,
+                    band=mastery.band,
+                    n_observed=mastery.n_observed,
+                    display_pct=mastery.display_pct,
+                    has_wiki=wiki_page is not None,
+                )
+            )
+
+        mastery_pct = round(100 * mastery_sum / len(concepts)) if concepts else 0
+        edges = [
+            {
+                "source": e.get("source"),
+                "target": e.get("target"),
+                "relation": e.get("relation", "prerequisite_of"),
+            }
+            for e in graph.edges
+            if e.get("relation") == "prerequisite_of"
+            and isinstance(e.get("source"), str)
+            and isinstance(e.get("target"), str)
+        ]
+        chapters.append(
+            GraphChapterView(
+                id=chapter_id,
+                knowledge_source=knowledge_source,
+                has_concept_graph=chapter.concept_graph_path.is_file(),
+                mastery_pct=mastery_pct,
+                concepts_proficient=proficient,
+                concepts_total=len(concepts),
+                concepts=concepts,
+                edges=edges,
+            )
+        )
+
+    return DomainGraphResponse(domain_id=domain_id, chapters=chapters)
 
 
 @app.post("/sessions/{session_id}/end", response_model=EndSessionResponse)

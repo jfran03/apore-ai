@@ -8,6 +8,7 @@ import type {
   TurnResponse,
   SessionStateResponse,
   LearnerMasteryResponse,
+  DomainGraph,
   ProviderConfig,
   ProviderConfigUpdate,
   BatchRunRequest,
@@ -118,6 +119,10 @@ export async function getLearnerMastery(
 ): Promise<LearnerMasteryResponse> {
   const qs = new URLSearchParams({ knowledge_source: knowledgeSource });
   return apiFetch<LearnerMasteryResponse>(`/learner/mastery?${qs.toString()}`);
+}
+
+export async function getDomainGraph(domainId: string): Promise<DomainGraph> {
+  return apiFetch<DomainGraph>(`/domains/${encodeURIComponent(domainId)}/graph`);
 }
 
 export async function getProviderConfig(): Promise<ProviderConfig> {

@@ -1,0 +1,510 @@
+/* Knowledge graph page — Domain -> Chapters -> Concepts on a React Flow canvas.
+   Calm research-instrument register: hairlines over shadows, band color carried
+   by the mono percentage and a small status dot, not by heavy node fills. */
+
+.graph-page {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  /* Strong ease-out curve (emil-design-eng); built-in easings lack punch. */
+  --graph-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.graph-canvas {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+/* Drill-down chrome: domain overview ↔ chapter focus */
+.graph-breadcrumb {
+  position: absolute;
+  top: var(--spacing-sm);
+  left: var(--spacing-sm);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xxs);
+  max-width: calc(100% - 2 * var(--spacing-sm));
+  padding: 6px 10px;
+  background-color: color-mix(in srgb, var(--color-surface-card) 92%, transparent);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  backdrop-filter: blur(8px);
+}
+
+.graph-breadcrumb__link {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--color-body);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.graph-breadcrumb__link:hover {
+  color: var(--color-ink);
+}
+
+.graph-breadcrumb__sep {
+  color: var(--color-muted-soft);
+  user-select: none;
+}
+
+.graph-breadcrumb__current {
+  color: var(--color-ink);
+  font-weight: var(--font-weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-breadcrumb__back {
+  appearance: none;
+  margin-left: var(--spacing-xs);
+  padding: 2px 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-card);
+  font: inherit;
+  color: var(--color-body);
+  cursor: pointer;
+}
+
+.graph-breadcrumb__back:hover {
+  border-color: var(--color-hairline-strong);
+  color: var(--color-ink);
+}
+
+/* React Flow theming hooks to project tokens. */
+.graph-canvas .react-flow {
+  --xy-background-color: var(--color-canvas);
+  --xy-edge-stroke-default: var(--color-hairline-strong);
+  --xy-edge-stroke-width-default: 1.5;
+  background-color: var(--color-canvas);
+}
+
+/* Smooth neighbor push + chip→wiki size morph (nodes are not draggable). */
+.graph-canvas .react-flow__node {
+  transition:
+    transform 220ms var(--graph-ease-out),
+    width 220ms var(--graph-ease-out),
+    height 220ms var(--graph-ease-out);
+}
+
+.graph-canvas .react-flow__background {
+  color: var(--color-hairline);
+}
+
+.graph-canvas .react-flow__background-pattern.dots circle {
+  fill: var(--color-hairline);
+}
+
+/* Edges */
+.graph-edge--structural .react-flow__edge-path {
+  stroke: var(--color-hairline-strong);
+  stroke-width: 1.25;
+}
+
+.graph-edge--prereq .react-flow__edge-path {
+  stroke: var(--color-muted-soft);
+  stroke-width: 1.5;
+}
+
+.graph-canvas .react-flow__edge-path {
+  transition: stroke 160ms ease;
+}
+
+.graph-canvas .react-flow__edge.selected .react-flow__edge-path,
+.graph-canvas .react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--color-body);
+}
+
+/* Handles are structural anchors only; keep them out of sight. */
+.graph-canvas .react-flow__handle {
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+  border: none;
+  opacity: 0;
+}
+
+/* Nodes -------------------------------------------------------------- */
+.graph-node {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xxs);
+  justify-content: center;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  cursor: default;
+  /* One-time settle as the canvas mounts. Animates the inner node only, never
+     React Flow's positioning transform on .react-flow__node. */
+  animation: graph-node-in 220ms var(--graph-ease-out) both;
+}
+
+@keyframes graph-node-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.graph-node__eyebrow {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted-soft);
+}
+
+.graph-node__title {
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-node--domain {
+  align-items: center;
+  text-align: center;
+  border-color: var(--color-hairline-strong);
+}
+
+.graph-node--domain .graph-node__title {
+  font-size: var(--font-size-title-sm);
+}
+
+/* Chapter node */
+.graph-node--chapter {
+  gap: var(--spacing-xxs);
+}
+
+.graph-chapter__mastery {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.graph-chapter__meter {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-strong);
+  overflow: hidden;
+}
+
+.graph-chapter__meter-fill {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-semantic-success);
+  transition: transform 260ms var(--graph-ease-out);
+}
+
+.graph-chapter__stats {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-xs);
+}
+
+.graph-chapter__pct {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-chapter__count {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.graph-chapter__uncompiled {
+  font-size: 11px;
+  color: var(--color-muted-soft);
+  font-style: italic;
+}
+
+/* Concept node */
+.graph-node--concept {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--spacing-xs);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.graph-node__dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+}
+
+.graph-node__concept-label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-body-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-node__pct {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-node--band-proficient {
+  border-color: color-mix(in srgb, var(--color-semantic-success) 40%, var(--color-hairline));
+}
+
+.graph-canvas .react-flow__node:hover .graph-node--concept {
+  border-color: var(--color-hairline-strong);
+}
+
+.graph-node--concept.graph-node--selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+/* Controls */
+.graph-canvas .react-flow__controls {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: none;
+  border: 1px solid var(--color-hairline);
+}
+
+.graph-canvas .react-flow__controls-button {
+  background-color: var(--color-surface-card);
+  border-bottom: 1px solid var(--color-hairline);
+  color: var(--color-body);
+}
+
+.graph-canvas .react-flow__controls-button:hover {
+  background-color: var(--color-hairline-soft);
+}
+
+.graph-canvas .react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+/* Expanded concept node (in-place wiki) ------------------------------ */
+.graph-node--concept.graph-node--expanded {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+
+.graph-node__expand-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-sm) var(--spacing-xs);
+  flex-shrink: 0;
+}
+
+.graph-node__expand-chapter {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted-soft);
+}
+
+.graph-node__expand-title {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-ink);
+  line-height: 1.3;
+}
+
+.graph-node__expand-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  color: var(--color-body);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 140ms var(--graph-ease-out);
+}
+
+.graph-node__expand-close:hover {
+  background-color: var(--color-hairline-soft);
+  color: var(--color-ink);
+}
+
+.graph-node__expand-close:active {
+  transform: scale(0.94);
+}
+
+.graph-node__expand-mastery {
+  display: flex;
+  gap: var(--spacing-base);
+  margin: 0;
+  padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm);
+  border-bottom: 1px solid var(--color-hairline);
+  flex-shrink: 0;
+}
+
+.graph-node__expand-mastery dt {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.graph-node__expand-mastery dd {
+  margin: 2px 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-ink);
+}
+
+.graph-node__expand-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--spacing-sm);
+  cursor: default;
+}
+
+.graph-node__expand-wiki {
+  font-size: var(--font-size-caption);
+  color: var(--color-body);
+  line-height: 1.5;
+}
+
+.graph-node__expand-empty {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.graph-node__expand-empty--error {
+  color: var(--color-semantic-error);
+}
+
+.graph-node__expand-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.graph-node__expand-bone {
+  height: 10px;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-strong) 0%,
+    var(--color-hairline-soft) 50%,
+    var(--color-surface-strong) 100%
+  );
+  background-size: 200% 100%;
+  animation: graph-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes graph-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Empty / status states --------------------------------------------- */
+.graph-empty {
+  margin: auto;
+  max-width: 420px;
+  padding: var(--spacing-xl);
+  text-align: center;
+}
+
+.graph-empty__title {
+  margin: 0 0 var(--spacing-xs);
+  font-size: var(--font-size-display-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-ink);
+}
+
+.graph-empty__note {
+  margin: 0;
+  font-size: var(--font-size-body-md);
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.graph-empty--error .graph-empty__note {
+  color: var(--color-semantic-error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-chapter__meter-fill,
+  .graph-node--concept {
+    transition: none;
+  }
+  .graph-node__expand-bone {
+    animation: none;
+  }
+  /* Keep opacity fades for comprehension; drop positional movement. */
+  .graph-node {
+    animation: graph-fade-in 180ms ease both;
+  }
+  @keyframes graph-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}

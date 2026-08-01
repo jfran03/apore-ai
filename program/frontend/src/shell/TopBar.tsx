@@ -10,7 +10,6 @@ import { useStudyFocus } from './StudyFocusContext';
 const MENU_ITEMS = [
   { to: '/study', label: 'Study' },
   { to: '/setup', label: 'Setup' },
-  { to: '/runs', label: 'Runs' },
   { to: '/graph', label: 'Graph' },
 ] as const;
 

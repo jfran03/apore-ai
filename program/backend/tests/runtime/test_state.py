@@ -12,11 +12,15 @@ from apore.runtime.state import (
     initialize,
     parse_question_log,
     read_asked_ids,
+    read_conversation_items,
     read_mastery,
+    read_runtime,
     read_scalar,
     read_session_meta,
     read_title,
+    write_conversation_items,
     write_mastery,
+    write_runtime,
     write_scalar,
     write_session_status,
 )
@@ -294,3 +298,75 @@ def test_asked_ids_roundtrip(tmp_path: Path):
     assert read_asked_ids(p) == {"sets_definition-recall-01", "sets_definition-apply-01"}
     append_asked_id(p, "sets_definition-recall-01")
     assert read_asked_ids(p) == {"sets_definition-recall-01", "sets_definition-apply-01"}
+
+
+def test_conversation_and_runtime_roundtrip(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    initialize(
+        p,
+        title="Chat",
+        session_id="abc-123",
+        created_at="2026-06-03T12:00:00+00:00",
+        knowledge_source="domain:discrete-math/01-set-theory",
+        focus_mode="adaptive",
+        max_questions=10,
+    )
+    assert "## Conversation" in p.read_text(encoding="utf-8")
+    assert "## Runtime" in p.read_text(encoding="utf-8")
+    assert read_conversation_items(p) == []
+    assert read_runtime(p) is None
+
+    write_conversation_items(
+        p,
+        [
+            {
+                "question_number": 1,
+                "question_id": "q1",
+                "question_text": "What is a set?",
+                "concept_id": "sets",
+                "concept_label": "Sets",
+                "correct": "yes",
+                "explicit_rating": "ok",
+                "assisted": False,
+                "status": "completed",
+                "messages": [
+                    {"role": "assistant", "content": "What is a set?"},
+                    {"role": "user", "content": "A collection of objects."},
+                ],
+            }
+        ],
+    )
+    items = read_conversation_items(p)
+    assert len(items) == 1
+    assert items[0]["question_text"] == "What is a set?"
+    assert items[0]["messages"][1]["content"] == "A collection of objects."
+    assert "```json" in p.read_text(encoding="utf-8")
+
+    write_runtime(p, {"question_count": 1, "tutor_mode": True})
+    runtime = read_runtime(p)
+    assert runtime == {"question_count": 1, "tutor_mode": True}
+
+    append_log_row(p, _sample_row(1))
+    # Log rows stay in Question Log; runtime section remains parseable.
+    assert read_runtime(p) == {"question_count": 1, "tutor_mode": True}
+    assert len(parse_question_log(p)) == 1
+    assert len(read_conversation_items(p)) == 1
+
+    write_runtime(p, None)
+    assert read_runtime(p) is None
+
+
+def test_initialize_session_includes_conversation_runtime(tmp_path: Path):
+    p = tmp_path / "learner-state.md"
+    initialize(
+        p,
+        title="Set Theory Basics",
+        session_id="abc-123",
+        created_at="2026-06-03T12:00:00+00:00",
+        knowledge_source="domain:discrete-math/01-set-theory",
+        focus_mode="weak_points",
+        max_questions=5,
+    )
+    text = p.read_text(encoding="utf-8")
+    assert text.index("## Conversation") < text.index("## Runtime")
+    assert text.index("## Runtime") < text.index("## Question Log")

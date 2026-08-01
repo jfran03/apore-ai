@@ -69,7 +69,10 @@ function SessionRows({ sessions }: { sessions: SessionSummary[] }) {
           <li key={s.session_id}>
             <Link to={`/sessions/${s.session_id}`} className="sidebar__session">
               <span className="sidebar__session-title" title={s.title}>
-                {s.title}
+                {s.status === 'active' && (
+                  <span className="sidebar__session-status" aria-label="In progress" title="In progress" />
+                )}
+                <span className="sidebar__session-title-text">{s.title}</span>
               </span>
               {chapterId && <span className="sidebar__session-chapter">{chapterId}</span>}
               <span className="sidebar__session-age">{formatRelativeAge(s.created_at)}</span>

@@ -22,24 +22,12 @@ export function App() {
               <Route path="/questions" element={<Navigate to="/setup" replace />} />
               <Route path="/study" element={<Study />} />
               <Route path="/sessions/:id" element={<SessionTranscriptPage />} />
-              <Route
-                path="/runs"
-                element={<PlaceholderPage title="Runs" note="Run history — coming soon." />}
-              />
+              <Route path="/runs" element={<Navigate to="/" replace />} />
               <Route path="/graph" element={<Graph />} />
             </Route>
           </Routes>
         </ActiveDomainProvider>
       </BrowserRouter>
     </MotionConfig>
-  );
-}
-
-function PlaceholderPage({ title, note }: { title: string; note: string }) {
-  return (
-    <main className="page">
-      <h1 className="page__title">{title}</h1>
-      <p className="page__subtitle">{note}</p>
-    </main>
   );
 }

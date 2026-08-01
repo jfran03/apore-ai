@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,10 @@ _LEGACY_TEMPLATE = """\
 ## Mastery
 
 ## Asked Questions
+
+## Conversation
+
+## Runtime
 
 ## Question Log
 | Q# | session | date | question_id | concept | question_type | intended_difficulty | explicit_rating | correct | hints | turns | hedging | reward_R | new_difficulty |
@@ -58,6 +63,8 @@ def _session_template(
         f"0.5\n\n"
         f"## Mastery\n\n"
         f"## Asked Questions\n\n"
+        f"## Conversation\n\n"
+        f"## Runtime\n\n"
         f"## Question Log\n"
         f"| Q# | session | date | question_id | concept | question_type | intended_difficulty | explicit_rating | correct | assisted | hints | turns | hedging | reward_R | new_difficulty |\n"
         f"|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
@@ -73,7 +80,117 @@ def _read_text(path: Path) -> str:
 
 
 def _write_text(path: Path, text: str) -> None:
-    path.write_text(text, encoding="utf-8")
+    """Atomically replace file contents (temp file + replace) to avoid truncate races."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _replace_section(text: str, heading: str, body: str) -> str:
+    """Replace content under ``## heading`` until the next ``##`` heading.
+
+    Creates the section at the end of the file when missing. ``body`` should
+    normally end with a newline (empty body leaves a blank section).
+    """
+    if body and not body.endswith("\n"):
+        body = body + "\n"
+    # Use [ \\t]* (not \\s*) so we do not consume the blank line after the heading
+    # and accidentally swallow the following ## section into the match body.
+    pattern = re.compile(
+        rf"(## {re.escape(heading)}[ \t]*\n)(.*?)(?=\n## |\Z)",
+        re.DOTALL,
+    )
+    if pattern.search(text):
+        return pattern.sub(lambda m: m.group(1) + body, text, count=1)
+    trimmed = text.rstrip("\n")
+    return f"{trimmed}\n\n## {heading}\n{body}"
+
+
+def format_messages_markdown(messages: list[dict[str, str]]) -> str:
+    """Render dialogue turns as readable markdown prose."""
+    lines: list[str] = []
+    for msg in messages:
+        role = (msg.get("role") or "").strip()
+        if role == "assistant":
+            label = "Tutor"
+        elif role == "user":
+            label = "Learner"
+        else:
+            label = role.title() or "Unknown"
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        lines.append(f"**{label}:** {content}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + ("\n" if lines else "")
+
+
+def read_conversation(path: Path) -> str:
+    """Return the raw body of ``## Conversation`` (may be empty)."""
+    text = _read_text(path)
+    m = re.search(r"## Conversation[ \t]*\n(.*?)(?=\n## |\Z)", text, re.DOTALL)
+    if not m:
+        return ""
+    return m.group(1)
+
+
+def write_conversation(path: Path, body: str) -> None:
+    """Replace the ``## Conversation`` section body."""
+    text = _read_text(path)
+    _write_text(path, _replace_section(text, "Conversation", body))
+
+
+def read_conversation_items(path: Path) -> list[dict[str, Any]]:
+    """Parse structured question items from ``## Conversation`` JSON."""
+    block = read_conversation(path).strip()
+    if not block:
+        return []
+    fence = re.search(r"```(?:json)?\s*\n(.*?)```", block, re.DOTALL)
+    raw = fence.group(1).strip() if fence else block
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def write_conversation_items(path: Path, items: list[dict[str, Any]]) -> None:
+    """Write structured question items as fenced JSON under ``## Conversation``."""
+    if not items:
+        write_conversation(path, "")
+        return
+    body = "```json\n" + json.dumps(items, indent=2, ensure_ascii=False) + "\n```\n"
+    write_conversation(path, body)
+
+
+def read_runtime(path: Path) -> dict[str, Any] | None:
+    """Parse JSON from ``## Runtime`` (fenced or raw). Empty/missing → None."""
+    text = _read_text(path)
+    m = re.search(r"## Runtime[ \t]*\n(.*?)(?=\n## |\Z)", text, re.DOTALL)
+    if not m:
+        return None
+    block = m.group(1).strip()
+    if not block:
+        return None
+    fence = re.search(r"```(?:json)?\s*\n(.*?)```", block, re.DOTALL)
+    raw = fence.group(1).strip() if fence else block
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_runtime(path: Path, data: dict[str, Any] | None) -> None:
+    """Write or clear the ``## Runtime`` JSON snapshot."""
+    if data is None:
+        body = ""
+    else:
+        body = "```json\n" + json.dumps(data, indent=2, ensure_ascii=False) + "\n```\n"
+    text = _read_text(path)
+    _write_text(path, _replace_section(text, "Runtime", body))
 
 
 # ---------------------------------------------------------------------------
@@ -300,9 +417,7 @@ def append_asked_id(path: Path, question_id: str) -> None:
     text = _read_text(path)
     if "## Asked Questions" not in text:
         raise ValueError("Asked Questions section not found in learner-state.md")
-    block_match = re.search(r"(## Asked Questions\s*\n)(.*?)(?=\n## )", text, re.DOTALL)
-    if not block_match:
-        block_match = re.search(r"(## Asked Questions\s*\n)(.*)", text, re.DOTALL)
+    block_match = re.search(r"(## Asked Questions[ \t]*\n)(.*?)(?=\n## |\Z)", text, re.DOTALL)
     if not block_match:
         raise ValueError("Asked Questions section not found in learner-state.md")
     prefix, block = block_match.group(1), block_match.group(2)
@@ -362,13 +477,21 @@ def append_log_row(path: Path, row: dict[str, Any]) -> None:
     """Append one row to the `## Question Log` table.
 
     The `row` dict must supply values for every column header found in the
-    table. Missing keys default to empty string.
+    table. Missing keys default to empty string. Inserts before any section
+    that follows the question-log table so Runtime/Conversation stay intact.
     """
     text = _read_text(path)
-    _, columns = _question_log_header(text)
+    header_match, columns = _question_log_header(text)
 
     values = [str(row.get(col, "")) for col in columns]
     new_row = "| " + " | ".join(values) + " |"
 
-    # Append after the last table row (or after the separator if no data rows)
+    after = text[header_match.end() :]
+    next_heading = re.search(r"\n## ", after)
+    if next_heading:
+        cut = header_match.end() + next_heading.start()
+        prefix = text[:cut].rstrip("\n")
+        suffix = text[cut:]
+        _write_text(path, prefix + "\n" + new_row + "\n" + suffix)
+        return
     _write_text(path, text.rstrip("\n") + "\n" + new_row + "\n")

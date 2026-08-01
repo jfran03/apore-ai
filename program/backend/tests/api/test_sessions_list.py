@@ -112,6 +112,7 @@ def test_get_transcript_returns_meta_and_body(sessions_dir):
     assert data["max_questions"] == 10
     assert data["status"] == "active"
     assert data["ended_at"] is None
+    assert data["questions"] == []
     assert "## Session" in data["body"]
     assert "## Question Log" in data["body"]
 

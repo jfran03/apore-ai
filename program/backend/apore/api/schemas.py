@@ -159,6 +159,53 @@ class SessionStateResponse(BaseModel):
     ended_at: str | None = None
 
 
+class DialogueMessageView(BaseModel):
+    role: str
+    content: str
+
+
+class PendingQuestionView(BaseModel):
+    question_number: int
+    question_id: str
+    concept_id: str
+    concept_label: str
+    concept: str
+    question_type: str
+    intended_difficulty: float
+    question_text: str
+
+
+class ResumeHistoryItem(BaseModel):
+    """Completed question row for the Study sidebar after resume."""
+
+    question_number: int
+    question_text: str
+    explicit_rating: str
+    correct: str
+    reward: float | None = None
+
+
+class ResumeSessionResponse(SessionStateResponse):
+    """Live session state plus enough UI fields to rebuild Study after hydrate."""
+
+    phase: Literal["idle", "dialogue", "skip_prompt", "graded", "reflection"] = "idle"
+    pending_question: PendingQuestionView | None = None
+    dialogue_messages: list[DialogueMessageView] = Field(default_factory=list)
+    awaiting_skip_reason: bool = False
+    tutor_mode: bool = False
+    history: list[ResumeHistoryItem] = Field(default_factory=list)
+    # Present when phase is graded or reflection (enough to rebuild rating UI).
+    correct: str | None = None
+    hint_count: int | None = None
+    turn_count: int | None = None
+    hedging_count: int | None = None
+    flag_reason: str | None = None
+    assisted: bool | None = None
+    explicit_rating: str | None = None
+    reward: float | None = None
+    new_difficulty: float | None = None
+
+
 class BKTParamsView(BaseModel):
     p_L0: float
     p_T: float
@@ -344,6 +391,24 @@ class SessionListResponse(BaseModel):
     sessions: list[SessionSummary]
 
 
+class SessionHistoryMessageView(BaseModel):
+    role: str
+    content: str
+
+
+class SessionHistoryQuestionView(BaseModel):
+    question_number: int
+    question_id: str
+    question_text: str
+    concept_id: str
+    concept_label: str
+    correct: str | None = None
+    explicit_rating: str | None = None
+    assisted: bool = False
+    status: Literal["completed", "in_progress", "awaiting_rating", "reflection"] = "completed"
+    messages: list[SessionHistoryMessageView] = Field(default_factory=list)
+
+
 class SessionTranscriptResponse(BaseModel):
     session_id: str
     title: str
@@ -354,6 +419,7 @@ class SessionTranscriptResponse(BaseModel):
     status: Literal["active", "completed", "ended_early"] = "active"
     ended_at: str | None = None
     body: str
+    questions: list[SessionHistoryQuestionView] = Field(default_factory=list)
 
 
 # --- Source ingestion --------------------------------------------------------

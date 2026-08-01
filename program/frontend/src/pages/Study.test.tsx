@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { StrictMode } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -8,6 +9,7 @@ import type {
   KnowledgeChapter,
   QuestionBankResponse,
   QuestionResponse,
+  ResumeSessionResponse,
   WikiPreview,
 } from '../api/types';
 
@@ -21,6 +23,7 @@ const getSessionState = vi.fn();
 const postTurn = vi.fn();
 const listSessions = vi.fn();
 const endSession = vi.fn();
+const resumeSession = vi.fn();
 const setStoredKnowledgeSource = vi.fn();
 
 vi.mock('../api/client', async () => {
@@ -37,6 +40,7 @@ vi.mock('../api/client', async () => {
     postTurn: (...args: unknown[]) => postTurn(...args),
     listSessions: (...args: unknown[]) => listSessions(...args),
     endSession: (...args: unknown[]) => endSession(...args),
+    resumeSession: (...args: unknown[]) => resumeSession(...args),
     setStoredKnowledgeSource: (...args: unknown[]) => setStoredKnowledgeSource(...args),
   };
 });
@@ -160,8 +164,49 @@ function questionResponse(): QuestionResponse {
   };
 }
 
-function renderStudy(initialPath = '/study') {
-  return render(
+function resumeResponse(extras: Partial<ResumeSessionResponse> = {}): ResumeSessionResponse {
+  const q = questionResponse();
+  return {
+    session_id: 'sess-resume-1',
+    title: 'Resumed Session',
+    scalar: 0.55,
+    question_count: 1,
+    mastery: {},
+    mastery_delta: {},
+    knowledge_source: 'domain:discrete-math/01-set-theory',
+    focus_mode: 'adaptive',
+    max_questions: 10,
+    questions_remaining: 9,
+    active_concept_id: q.concept_id,
+    concept_ids: ['what_is_a_set', 'set_operations'],
+    title_pending: false,
+    status: 'active',
+    ended_at: null,
+    phase: 'dialogue',
+    pending_question: {
+      question_number: q.question_number,
+      question_id: q.question_id,
+      concept_id: q.concept_id,
+      concept_label: q.concept_label,
+      concept: q.concept,
+      question_type: q.question_type,
+      intended_difficulty: q.intended_difficulty,
+      question_text: q.question_text,
+    },
+    dialogue_messages: [
+      { role: 'assistant', content: q.question_text },
+      { role: 'user', content: 'I need help understanding this question' },
+      { role: 'assistant', content: 'Tutor mode — start with the definition.' },
+    ],
+    awaiting_skip_reason: false,
+    tutor_mode: true,
+    history: [],
+    ...extras,
+  };
+}
+
+function renderStudy(initialPath = '/study', { strict = false }: { strict?: boolean } = {}) {
+  const tree = (
     <MemoryRouter initialEntries={[initialPath]}>
       <ActiveDomainProvider>
         <Routes>
@@ -171,8 +216,9 @@ function renderStudy(initialPath = '/study') {
           </Route>
         </Routes>
       </ActiveDomainProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 async function openChatConfig() {
@@ -225,6 +271,7 @@ beforeEach(() => {
   postTurn.mockReset();
   listSessions.mockReset().mockResolvedValue({ sessions: [] });
   endSession.mockReset();
+  resumeSession.mockReset();
   setStoredKnowledgeSource.mockReset();
   localStorage.clear();
 
@@ -615,5 +662,122 @@ describe('Study mastery delta', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Close summary' }));
     expect(screen.getByText('1 concept moved')).toBeInTheDocument();
+  });
+});
+
+describe('Study resume attach', () => {
+  it('calls resumeSession and hydrates dialogue when opened with ?session=', async () => {
+    resumeSession.mockResolvedValue(
+      resumeResponse({
+        history: [
+          {
+            question_number: 1,
+            question_text: 'Earlier completed question',
+            explicit_rating: 'ok',
+            correct: 'yes',
+            reward: 0.2,
+          },
+        ],
+        question_count: 2,
+        pending_question: {
+          question_number: 2,
+          question_id: 'what_is_a_set-recall-02',
+          concept_id: 'what_is_a_set',
+          concept_label: 'What is a Set',
+          concept: 'What is a Set',
+          question_type: 'recall',
+          intended_difficulty: 0.2,
+          question_text: 'Define a set.',
+        },
+      }),
+    );
+    localStorage.setItem('apore.knowledge_source', 'domain:discrete-math/01-set-theory');
+
+    renderStudy('/study?session=sess-resume-1', { strict: true });
+
+    await waitFor(() => {
+      expect(resumeSession).toHaveBeenCalledWith('sess-resume-1');
+    });
+    // Strict Mode remounts effects; resume is idempotent so a second call is OK.
+    expect(resumeSession.mock.calls.length).toBeGreaterThanOrEqual(1);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Define a set.').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('I need help understanding this question').length).toBeGreaterThan(
+        0,
+      );
+      expect(
+        screen.getAllByText(/Tutor mode — start with the definition/i).length,
+      ).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Resumed Session/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Q1').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('ok').length).toBeGreaterThan(0);
+    });
+    expect(createSession).not.toHaveBeenCalled();
+    expect(fetchQuestion).not.toHaveBeenCalled();
+    expect(setStoredKnowledgeSource).toHaveBeenCalledWith(
+      'domain:discrete-math/01-set-theory',
+    );
+  });
+
+  it('idle resume fetches the next question under Strict Mode', async () => {
+    resumeSession.mockResolvedValue(
+      resumeResponse({
+        phase: 'idle',
+        pending_question: null,
+        dialogue_messages: [],
+        tutor_mode: false,
+        question_count: 1,
+        questions_remaining: 9,
+        history: [
+          {
+            question_number: 1,
+            question_text: 'Completed before idle',
+            explicit_rating: 'hard',
+            correct: 'no',
+            reward: -0.1,
+          },
+        ],
+      }),
+    );
+    fetchQuestion.mockResolvedValue({
+      ...questionResponse(),
+      question_number: 2,
+      question_id: 'set_operations-apply-01',
+      concept_id: 'set_operations',
+      concept_label: 'Set Operations',
+      concept: 'Set Operations',
+      question_text: 'Compute A ∪ B.',
+    });
+    localStorage.setItem('apore.knowledge_source', 'domain:discrete-math/01-set-theory');
+
+    renderStudy('/study?session=sess-resume-1', { strict: true });
+
+    await waitFor(() => {
+      expect(resumeSession).toHaveBeenCalledWith('sess-resume-1');
+      expect(fetchQuestion).toHaveBeenCalledWith('sess-resume-1', {});
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Compute A ∪ B.').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Q1').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('hard').length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Resumed Session/i).length).toBeGreaterThan(0);
+    });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it('shows resume error on the preamble when resume fails', async () => {
+    resumeSession.mockRejectedValue(new Error('Session is completed; start a new session to continue'));
+    localStorage.setItem('apore.knowledge_source', 'domain:discrete-math/01-set-theory');
+
+    renderStudy('/study?session=sess-dead', { strict: true });
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(/Session is completed; start a new session to continue/i).length,
+      ).toBeGreaterThan(0);
+    });
+    expect(screen.getAllByText('Chat Mode').length).toBeGreaterThan(0);
   });
 });

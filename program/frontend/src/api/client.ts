@@ -21,6 +21,7 @@ import type {
   QuestionBankGenerateStatus,
   SessionListResponse,
   SessionTranscript,
+  ResumeSessionResponse,
   EndSessionResponse,
   SourceEntry,
   SourceListResult,
@@ -380,6 +381,12 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
 
 export async function getSessionTranscript(sessionId: string): Promise<SessionTranscript> {
   return apiFetch<SessionTranscript>(`/sessions/${encodeURIComponent(sessionId)}/transcript`);
+}
+
+export async function resumeSession(sessionId: string): Promise<ResumeSessionResponse> {
+  return apiFetch<ResumeSessionResponse>(`/sessions/${encodeURIComponent(sessionId)}/resume`, {
+    method: 'POST',
+  });
 }
 
 export async function getChapterSources(

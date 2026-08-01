@@ -573,11 +573,26 @@
 }
 
 .sidebar__session-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   flex: 1;
+  min-width: 0;
+}
+
+.sidebar__session-title-text {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.sidebar__session-status {
+  flex: 0 0 auto;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--color-primary);
 }
 
 .sidebar__session-chapter {

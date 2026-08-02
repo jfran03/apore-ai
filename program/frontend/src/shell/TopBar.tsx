@@ -15,7 +15,7 @@ const MENU_ITEMS = [
 
 export function TopBar() {
   const { activeDomain } = useActiveDomain();
-  const { focused, onExitRequest } = useStudyFocus();
+  const { focused, focusMode, onExitRequest } = useStudyFocus();
   const { pathname } = useLocation();
   const landing = pathname === '/';
   const [navOpen, setNavOpen] = useState(false);
@@ -44,6 +44,11 @@ export function TopBar() {
   useEffect(() => {
     if (landing || focused) setNavOpen(false);
   }, [landing, focused]);
+
+  // Scratchpad owns Exit in its immersive toolbar; hide the global focused bar.
+  if (focusMode === 'scratchpad') {
+    return null;
+  }
 
   if (focused) {
     return (

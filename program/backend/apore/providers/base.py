@@ -8,7 +8,7 @@ class Provider(ABC):
     def invoke(
         self,
         system_prompt: str,
-        messages: list[dict],  # [{"role": "user"|"assistant", "content": str}]
+        messages: list[dict],  # content: str | list[multimodal parts]
         model: str,
         config: dict,
     ) -> str:

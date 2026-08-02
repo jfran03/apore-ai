@@ -94,6 +94,20 @@ _SIGNALS = {
     "hedging_count": 0,
 }
 
+def _content_as_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                parts.append(str(part.get("text") or ""))
+            elif isinstance(part, dict) and part.get("type") in {"image_url", "image"}:
+                parts.append("[Scratchpad selection]")
+        return "\n".join(p for p in parts if p)
+    return str(content or "")
+
+
 def _dialogue_user_count(messages: list[dict]) -> int:
     user_msgs = [m for m in messages if m.get("role") == "user"]
     # First user message is the static protocol/grounding block from assemble_prompt.
@@ -104,7 +118,16 @@ def _last_user_message(messages: list[dict]) -> str:
     user_msgs = [m for m in messages if m.get("role") == "user"]
     if len(user_msgs) <= 1:
         return ""
-    return str(user_msgs[-1].get("content", ""))
+    return _content_as_text(user_msgs[-1].get("content", ""))
+
+
+def _content_has_image(content: object) -> bool:
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(part, dict) and part.get("type") in {"image_url", "image"}
+        for part in content
+    )
 
 
 class StubProvider(Provider):
@@ -152,12 +175,33 @@ class StubProvider(Provider):
             return "Introduction to Sets — Adaptive Practice"
         if protocol == "generate-question":
             return _QUESTION_BLOCK
-        if protocol == "tutor-turn":
+        if protocol in ("tutor-turn", "scratchpad-ask"):
+            last_content = ""
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    last_content = msg.get("content")
+                    break
+            if protocol == "scratchpad-ask" and _content_has_image(last_content):
+                if _dialogue_user_count(messages) >= 2:
+                    return (
+                        _TUTOR_CLOSE
+                        + '\n{"question_closed": true, "feedback_regions": []}'
+                    )
+                return (
+                    _TUTOR_HINT
+                    + '\n{"feedback_regions": [{"x": 0.2, "y": 0.3, "w": 0.4, "h": 0.2, '
+                    '"label": "Check this step", "explanation": "Revisit the marked work."}]}'
+                )
             if _dialogue_user_count(messages) >= 2:
                 return _TUTOR_CLOSE
             return _TUTOR_HINT
-        if protocol == "grade-answer":
+        if protocol in ("grade-answer", "scratchpad-grade"):
             last_user = _last_user_message(messages).lower()
+            last_content = ""
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    last_content = msg.get("content")
+                    break
             if any(
                 phrase in last_user
                 for phrase in (
@@ -170,11 +214,29 @@ class StubProvider(Provider):
                 )
             ):
                 return _GRADE_HELP
-            if "list" in last_user:
+            if "list" in last_user or "wrong" in last_user:
+                if protocol == "scratchpad-grade" and _content_has_image(last_content):
+                    return (
+                        "Not quite. A set is not the same as a list — sets are collections "
+                        "of distinct elements without order or duplicates. "
+                        "[Source: sets_definition — Definition]\n"
+                        '{"question_closed": true, "correct": "no", '
+                        '"feedback_regions": [{"x": 0.15, "y": 0.25, "w": 0.5, "h": 0.3, '
+                        '"label": "Incorrect region", '
+                        '"explanation": "This part of the work is incorrect."}]}'
+                    )
                 return _GRADE_WRONG
+            if protocol == "scratchpad-grade" and _content_has_image(last_content):
+                return (
+                    "Correct. A set collects distinct elements with no implied order. "
+                    "[Source: sets_definition — Definition]\n"
+                    '{"question_closed": true, "correct": "yes", "feedback_regions": []}'
+                )
             return _GRADE_CORRECT
 
-        combined = system_prompt + " ".join(m.get("content", "") for m in messages)
+        combined = system_prompt + " ".join(
+            _content_as_text(m.get("content", "")) for m in messages
+        )
         if "extract-signals" in combined:
             return json.dumps(_SIGNALS)
         return _QUESTION_BLOCK

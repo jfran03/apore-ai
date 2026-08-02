@@ -7,9 +7,12 @@ import {
   type ReactNode,
 } from 'react';
 
+export type StudyFocusMode = 'chat' | 'scratchpad' | null;
+
 interface StudyFocusContextValue {
   focused: boolean;
-  setFocused: (focused: boolean) => void;
+  focusMode: StudyFocusMode;
+  setFocused: (focused: boolean, mode?: Exclude<StudyFocusMode, null>) => void;
   onExitRequest: (() => void) | null;
   setOnExitRequest: (handler: (() => void) | null) => void;
 }
@@ -17,16 +20,26 @@ interface StudyFocusContextValue {
 const StudyFocusContext = createContext<StudyFocusContextValue | null>(null);
 
 export function StudyFocusProvider({ children }: { children: ReactNode }) {
-  const [focused, setFocused] = useState(false);
+  const [focusMode, setFocusMode] = useState<StudyFocusMode>(null);
   const [onExitRequest, setOnExitRequestState] = useState<(() => void) | null>(null);
+
+  const setFocused = useCallback((focused: boolean, mode: Exclude<StudyFocusMode, null> = 'chat') => {
+    setFocusMode(focused ? mode : null);
+  }, []);
 
   const setOnExitRequest = useCallback((handler: (() => void) | null) => {
     setOnExitRequestState(() => handler);
   }, []);
 
   const value = useMemo(
-    () => ({ focused, setFocused, onExitRequest, setOnExitRequest }),
-    [focused, onExitRequest, setOnExitRequest],
+    () => ({
+      focused: focusMode != null,
+      focusMode,
+      setFocused,
+      onExitRequest,
+      setOnExitRequest,
+    }),
+    [focusMode, onExitRequest, setFocused, setOnExitRequest],
   );
 
   return (

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,10 @@ class CreateSessionRequest(BaseModel):
     focus_mode: str = Field(
         default="adaptive",
         description='Question selection strategy: "adaptive" or "weak_points"',
+    )
+    study_mode: str = Field(
+        default="chat",
+        description='Learner interaction surface: "chat" or "scratchpad"',
     )
     max_questions: int = Field(default=10, ge=1, le=50)
     concept_ids: list[str] | None = Field(
@@ -37,9 +41,21 @@ class CreateSessionResponse(BaseModel):
     created_at: str
     knowledge_source: str
     focus_mode: str
+    study_mode: str = "chat"
     max_questions: int
     concept_ids: list[str] = Field(default_factory=list)
     title_pending: bool = False
+
+
+class FeedbackRegion(BaseModel):
+    """Normalized crop-relative region the tutor wants highlighted (0–1)."""
+
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+    w: float = Field(gt=0.0, le=1.0)
+    h: float = Field(gt=0.0, le=1.0)
+    label: str = ""
+    explanation: str = ""
 
 
 class TurnRequest(BaseModel):
@@ -66,6 +82,14 @@ class TurnRequest(BaseModel):
     correct: str | None = Field(
         default=None,
         description="Deprecated; correctness is LLM-assessed on the grade step",
+    )
+    scratchpad_action: Literal["ask", "submit"] | None = Field(
+        default=None,
+        description='Scratchpad selection action: "ask" (help) or "submit" (grade)',
+    )
+    learner_image: str | None = Field(
+        default=None,
+        description="PNG/JPEG data URI of the selected scratchpad region",
     )
 
     model_config = {"populate_by_name": True}
@@ -118,6 +142,10 @@ class TurnResponse(BaseModel):
         default=False,
         description="True when the closed question used tutor mode at any point",
     )
+    feedback_regions: list[FeedbackRegion] = Field(
+        default_factory=list,
+        description="Optional crop-relative regions highlighting incorrect/relevant work",
+    )
 
 
 class ConceptMasteryDeltaView(BaseModel):
@@ -150,6 +178,7 @@ class SessionStateResponse(BaseModel):
     )
     knowledge_source: str
     focus_mode: str
+    study_mode: str = "chat"
     max_questions: int
     questions_remaining: int
     active_concept_id: str | None = None
@@ -162,6 +191,86 @@ class SessionStateResponse(BaseModel):
 class DialogueMessageView(BaseModel):
     role: str
     content: str
+    attachment: Literal["scratchpad_selection"] | None = None
+
+
+class ScratchpadCamera(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+    scale: float = Field(default=1.0, gt=0.0)
+
+
+class ScratchpadExportBounds(BaseModel):
+    x: float
+    y: float
+    width: float = Field(gt=0.0)
+    height: float = Field(gt=0.0)
+    padding: float = Field(default=0.0, ge=0.0)
+
+
+class ScratchpadStrokeNode(BaseModel):
+    id: str
+    type: Literal["stroke"]
+    x: float
+    y: float
+    points: list[float]
+    stroke: str
+    stroke_width: float = Field(gt=0.0)
+    scale_x: float = Field(default=1.0, gt=0.0)
+    scale_y: float = Field(default=1.0, gt=0.0)
+    rotation: float = 0.0
+
+
+class ScratchpadTextNode(BaseModel):
+    id: str
+    type: Literal["text"]
+    x: float
+    y: float
+    text: str
+    fill: str
+    font_size: float = Field(gt=0.0)
+    width: float = Field(gt=0.0)
+    height: float = Field(gt=0.0)
+    scale_x: float = Field(default=1.0, gt=0.0)
+    scale_y: float = Field(default=1.0, gt=0.0)
+    rotation: float = 0.0
+
+
+class ScratchpadShapeNode(BaseModel):
+    id: str
+    type: Literal["rectangle", "ellipse", "line"]
+    x: float
+    y: float
+    width: float
+    height: float
+    stroke: str
+    stroke_width: float = Field(gt=0.0)
+    scale_x: float = Field(default=1.0, gt=0.0)
+    scale_y: float = Field(default=1.0, gt=0.0)
+    rotation: float = 0.0
+
+
+ScratchpadNode = Annotated[
+    ScratchpadStrokeNode | ScratchpadTextNode | ScratchpadShapeNode,
+    Field(discriminator="type"),
+]
+
+
+class ScratchpadScenePayload(BaseModel):
+    """Versioned Apore scratchpad document for the active question."""
+
+    question_number: int
+    schema_version: Literal[1] = 1
+    engine: Literal["apore-konva"] = "apore-konva"
+    nodes: list[ScratchpadNode] = Field(default_factory=list)
+    camera: ScratchpadCamera = Field(default_factory=ScratchpadCamera)
+    last_export_bounds: ScratchpadExportBounds | None = None
+    feedback_regions: list[FeedbackRegion] = Field(default_factory=list)
+
+
+class ScratchpadSceneResponse(BaseModel):
+    question_number: int
+    scene: ScratchpadScenePayload | None = None
 
 
 class PendingQuestionView(BaseModel):
@@ -204,6 +313,7 @@ class ResumeSessionResponse(SessionStateResponse):
     explicit_rating: str | None = None
     reward: float | None = None
     new_difficulty: float | None = None
+    scratchpad_scene: ScratchpadScenePayload | None = None
 
 
 class BKTParamsView(BaseModel):

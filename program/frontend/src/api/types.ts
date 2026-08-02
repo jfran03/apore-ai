@@ -1,7 +1,10 @@
+export type StudyMode = 'chat' | 'scratchpad';
+
 export interface CreateSessionRequest {
   knowledge_source?: string;
   fixture?: string;
   focus_mode?: 'adaptive' | 'weak_points';
+  study_mode?: StudyMode;
   max_questions?: number;
   concept_ids?: string[];
 }
@@ -13,6 +16,7 @@ export interface CreateSessionResponse {
   created_at: string;
   knowledge_source: string;
   focus_mode: 'adaptive' | 'weak_points';
+  study_mode?: StudyMode;
   max_questions: number;
   concept_ids: string[];
   title_pending?: boolean;
@@ -33,6 +37,15 @@ export interface QuestionResponse {
   question_text: string;
 }
 
+export interface FeedbackRegion {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label?: string;
+  explanation?: string;
+}
+
 export interface TurnRequest {
   learner_message?: string;
   /** @deprecated Use learner_message */
@@ -45,6 +58,10 @@ export interface TurnRequest {
   continue?: boolean;
   /** @deprecated Correctness is LLM-assessed on the grade step */
   correct?: string;
+  /** Scratchpad selection action paired with learner_image */
+  scratchpad_action?: 'ask' | 'submit';
+  /** PNG/JPEG data URI of the selected scratchpad region */
+  learner_image?: string;
 }
 
 export type TurnPhase =
@@ -73,6 +90,78 @@ export interface TurnResponse {
   flag_reason?: string | null;
   /** True when the closed question used tutor mode at any point */
   assisted?: boolean;
+  /** Crop-relative regions highlighting incorrect/relevant work */
+  feedback_regions?: FeedbackRegion[];
+}
+
+export interface ScratchpadScenePayload {
+  question_number: number;
+  schema_version: 1;
+  engine: 'apore-konva';
+  nodes: ScratchpadNode[];
+  camera: ScratchpadCamera;
+  last_export_bounds: ScratchpadExportBounds | null;
+  feedback_regions: FeedbackRegion[];
+}
+
+export interface ScratchpadCamera {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+export interface ScratchpadExportBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  padding: number;
+}
+
+export type ScratchpadNode =
+  | {
+      id: string;
+      type: 'stroke';
+      x: number;
+      y: number;
+      points: number[];
+      stroke: string;
+      stroke_width: number;
+      scale_x?: number;
+      scale_y?: number;
+      rotation?: number;
+    }
+  | {
+      id: string;
+      type: 'text';
+      x: number;
+      y: number;
+      text: string;
+      fill: string;
+      font_size: number;
+      width: number;
+      height: number;
+      scale_x?: number;
+      scale_y?: number;
+      rotation?: number;
+    }
+  | {
+      id: string;
+      type: 'rectangle' | 'ellipse' | 'line';
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      stroke: string;
+      stroke_width: number;
+      scale_x?: number;
+      scale_y?: number;
+      rotation?: number;
+    };
+
+export interface ScratchpadSceneResponse {
+  question_number: number;
+  scene: ScratchpadScenePayload | null;
 }
 
 export interface SessionStateResponse {
@@ -86,6 +175,7 @@ export interface SessionStateResponse {
   mastery_delta?: Record<string, ConceptMasteryDelta>;
   knowledge_source: string;
   focus_mode: 'adaptive' | 'weak_points';
+  study_mode?: StudyMode;
   max_questions: number;
   questions_remaining: number;
   active_concept_id?: string | null;
@@ -392,6 +482,7 @@ export interface SessionTranscript {
 export interface DialogueMessageView {
   role: string;
   content: string;
+  attachment?: 'scratchpad_selection' | null;
 }
 
 export interface PendingQuestionView {
@@ -429,6 +520,7 @@ export interface ResumeSessionResponse {
   mastery_delta?: Record<string, ConceptMasteryDelta>;
   knowledge_source: string;
   focus_mode: 'adaptive' | 'weak_points' | string;
+  study_mode?: StudyMode;
   max_questions: number;
   questions_remaining: number;
   active_concept_id?: string | null;
@@ -441,6 +533,7 @@ export interface ResumeSessionResponse {
   dialogue_messages: DialogueMessageView[];
   awaiting_skip_reason: boolean;
   tutor_mode: boolean;
+  scratchpad_scene?: ScratchpadScenePayload | null;
   history?: ResumeHistoryItem[];
   correct?: string | null;
   hint_count?: number | null;

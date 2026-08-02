@@ -11,30 +11,52 @@ supported.
 
 from __future__ import annotations
 
-import base64
-import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
 
 import anthropic
 from openai import OpenAI
 
 from apore.config.llm import NoLLMConfigured, ResolvedLLM, load_llm_config, resolve_active
+from apore.providers.multimodal import (
+    MultimodalError,
+    parse_data_uri,
+    to_anthropic_message as _convert_to_anthropic_message,
+)
 from apore.providers.nim_adapter import NIMProvider
 
 # Bound MarkItDown image calls so a hung vision request cannot stall upload forever.
 VISION_TIMEOUT_SECONDS = 60.0
 VISION_MAX_TOKENS = 2048
 
-_DATA_URI_RE = re.compile(
-    r"^data:(?P<media_type>[^;]+);base64,(?P<data>.+)$",
-    re.DOTALL,
-)
-
 
 class VisionClientError(RuntimeError):
     """Raised when a vision request cannot be completed."""
+
+
+def _to_anthropic_message(message: dict) -> dict:
+    """Backward-compatible wrapper used by MarkItDown tests."""
+    try:
+        return _convert_to_anthropic_message(message)
+    except MultimodalError as exc:
+        text = str(exc).replace("Unsupported image media type", "Unsupported vision media type")
+        raise VisionClientError(text) from exc
+
+
+def _source_from_data_uri(url: str) -> dict:
+    """Backward-compatible wrapper used by MarkItDown tests."""
+    import base64
+
+    try:
+        media_type, raw = parse_data_uri(url)
+    except MultimodalError as exc:
+        text = str(exc).replace("Unsupported image media type", "Unsupported vision media type")
+        raise VisionClientError(text) from exc
+    return {
+        "type": "base64",
+        "media_type": media_type,
+        "data": base64.b64encode(raw).decode("ascii"),
+    }
 
 
 @dataclass
@@ -60,7 +82,10 @@ class _AnthropicCompletions:
         if not messages:
             raise VisionClientError("Vision request had no messages.")
         # MarkItDown sends a single user turn with mixed text + image_url parts.
-        converted = [_to_anthropic_message(msg) for msg in messages]
+        try:
+            converted = [_to_anthropic_message(msg) for msg in messages]
+        except VisionClientError:
+            raise
         try:
             response = self._client.messages.create(
                 model=model,
@@ -95,60 +120,6 @@ class AnthropicVisionClient:
             timeout=VISION_TIMEOUT_SECONDS,
         )
         self.chat = _AnthropicChat(self._client)
-
-
-def _to_anthropic_message(message: dict) -> dict:
-    role = message.get("role") or "user"
-    content = message.get("content")
-    if isinstance(content, str):
-        return {"role": role, "content": content}
-    if not isinstance(content, list):
-        raise VisionClientError("Unsupported vision message content shape.")
-
-    blocks: list[dict] = []
-    for part in content:
-        if not isinstance(part, dict):
-            continue
-        part_type = part.get("type")
-        if part_type == "text":
-            text = part.get("text") or ""
-            if text:
-                blocks.append({"type": "text", "text": text})
-        elif part_type == "image_url":
-            image_url = part.get("image_url") or {}
-            url = image_url.get("url") if isinstance(image_url, dict) else None
-            if not url:
-                raise VisionClientError("Vision image_url was missing a url.")
-            blocks.append({"type": "image", "source": _source_from_data_uri(url)})
-        else:
-            raise VisionClientError(f"Unsupported vision content type: {part_type!r}")
-    if not blocks:
-        raise VisionClientError("Vision message had no usable content blocks.")
-    return {"role": role, "content": blocks}
-
-
-def _source_from_data_uri(url: str) -> dict:
-    match = _DATA_URI_RE.match(url.strip())
-    if not match:
-        parsed = urlparse(url)
-        if parsed.scheme in {"http", "https"}:
-            raise VisionClientError(
-                "Remote image URLs are not supported for Anthropic vision conversion."
-            )
-        raise VisionClientError("Vision image must be a base64 data URI.")
-    media_type = match.group("media_type").strip().lower()
-    if media_type not in {"image/jpeg", "image/png"}:
-        raise VisionClientError(f"Unsupported vision media type: {media_type!r}")
-    data = match.group("data").strip()
-    try:
-        base64.b64decode(data, validate=True)
-    except Exception as exc:
-        raise VisionClientError("Vision image data URI was not valid base64.") from exc
-    return {
-        "type": "base64",
-        "media_type": media_type,
-        "data": data,
-    }
 
 
 class _TimedOpenAICompletions:

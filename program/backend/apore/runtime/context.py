@@ -14,6 +14,8 @@ _VALID_PROTOCOLS = {
     "extract-signals",
     "tutor-turn",
     "grade-answer",
+    "scratchpad-ask",
+    "scratchpad-grade",
 }
 
 

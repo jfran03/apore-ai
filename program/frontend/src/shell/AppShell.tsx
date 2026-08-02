@@ -1,24 +1,40 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { ApiKeyGate } from './ApiKeyGate';
-import { StudyFocusProvider } from './StudyFocusContext';
+import { StudyFocusProvider, useStudyFocus } from './StudyFocusContext';
 import { TopBar } from './TopBar';
 import '../styles/shell.css';
 
-export function AppShell() {
+function ShellFrame() {
   const { pathname } = useLocation();
+  const { focusMode } = useStudyFocus();
   const landing = pathname === '/';
+  const scratchpadFocused = focusMode === 'scratchpad';
 
   return (
-    <StudyFocusProvider>
-      <div className={`shell${landing ? ' shell--landing' : ''}`}>
-        <TopBar />
-        <div className="shell__body">
-          <div className="shell__content">
-            <Outlet />
-          </div>
+    <div
+      className={[
+        'shell',
+        landing ? 'shell--landing' : '',
+        scratchpadFocused ? 'shell--scratchpad-focused' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <TopBar />
+      <div className="shell__body">
+        <div className="shell__content">
+          <Outlet />
         </div>
-        <ApiKeyGate />
       </div>
+      <ApiKeyGate />
+    </div>
+  );
+}
+
+export function AppShell() {
+  return (
+    <StudyFocusProvider>
+      <ShellFrame />
     </StudyFocusProvider>
   );
 }

@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,7 +32,11 @@ from apore.api.schemas import (
     RenameDomainRequest,
     CreateSessionRequest,
     CreateSessionResponse,
+    DialogueMessageView,
     EndSessionResponse,
+    PendingQuestionView,
+    ResumeHistoryItem,
+    ResumeSessionResponse,
     FixtureFetchResponse,
     KnowledgeCatalogResponse,
     LearnerMasteryResponse,
@@ -43,6 +48,8 @@ from apore.api.schemas import (
     QuestionBankResponse,
     QuestionRequest,
     QuestionResponse,
+    SessionHistoryMessageView,
+    SessionHistoryQuestionView,
     SessionListResponse,
     SessionStateResponse,
     SessionSummary,
@@ -185,6 +192,8 @@ class SessionState:
     active_concept_id: str | None = None
     asked_question_ids: set[str] = field(default_factory=set)
     metadata: dict = field(default_factory=dict)
+    # Committed completed questions; in-flight item merged on persist.
+    conversation_items: list[dict[str, Any]] = field(default_factory=list)
 
 
 sessions: dict[str, SessionState] = {}
@@ -348,6 +357,508 @@ def _session_status_from_meta(meta: dict[str, str]) -> tuple[str, str | None]:
     return status, ended_raw or None
 
 
+def _serialize_question(q: GeneratedQuestion) -> dict[str, Any]:
+    return {
+        "question_number": q.question_number,
+        "question_id": q.question_id,
+        "concept_id": q.concept_id,
+        "concept_label": q.concept_label,
+        "question_type": q.question_type,
+        "intended_difficulty": q.intended_difficulty,
+        "question_text": q.question_text,
+        "gen_response": q.gen_response,
+    }
+
+
+def _deserialize_question(data: dict[str, Any]) -> GeneratedQuestion:
+    return GeneratedQuestion(
+        question_number=int(data["question_number"]),
+        question_id=str(data["question_id"]),
+        concept_id=str(data["concept_id"]),
+        concept_label=str(data["concept_label"]),
+        question_type=str(data["question_type"]),
+        intended_difficulty=float(data["intended_difficulty"]),
+        question_text=str(data["question_text"]),
+        gen_response=str(data.get("gen_response") or ""),
+    )
+
+
+def _serialize_assessment(a: AssessmentResult) -> dict[str, Any]:
+    return asdict(a)
+
+
+def _deserialize_assessment(data: dict[str, Any]) -> AssessmentResult:
+    return AssessmentResult(
+        correct=str(data.get("correct") or "no"),
+        hint_count=int(data.get("hint_count") or 0),
+        turn_count=int(data.get("turn_count") or 0),
+        hedging_count=int(data.get("hedging_count") or 0),
+        llm_explicit_rating=str(data.get("llm_explicit_rating") or "ok"),
+        llm_inconsistency=bool(data.get("llm_inconsistency") or False),
+        flag_reason=data.get("flag_reason"),
+    )
+
+
+def _serialize_grading(g: GradingResult) -> dict[str, Any]:
+    return asdict(g)
+
+
+def _deserialize_grading(data: dict[str, Any]) -> GradingResult:
+    return GradingResult(
+        question_number=int(data["question_number"]),
+        explicit_rating=str(data["explicit_rating"]),
+        correct=str(data["correct"]),
+        hint_count=int(data["hint_count"]),
+        turn_count=int(data["turn_count"]),
+        hedging_count=int(data["hedging_count"]),
+        reward=float(data["reward"]),
+        new_difficulty=float(data["new_difficulty"]),
+        inconsistency_flag=bool(data.get("inconsistency_flag") or False),
+    )
+
+
+def _messages_copy(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+        for m in messages
+        if m.get("role") is not None and m.get("content") is not None
+    ]
+
+
+def _question_history_item(
+    q: GeneratedQuestion,
+    *,
+    status: str,
+    messages: list[dict[str, str]],
+    correct: str | None = None,
+    explicit_rating: str | None = None,
+    assisted: bool = False,
+) -> dict[str, Any]:
+    return {
+        "question_number": q.question_number,
+        "question_id": q.question_id,
+        "question_text": q.question_text,
+        "concept_id": q.concept_id,
+        "concept_label": q.concept_label,
+        "correct": correct,
+        "explicit_rating": explicit_rating,
+        "assisted": assisted,
+        "status": status,
+        "messages": _messages_copy(messages),
+    }
+
+
+def _in_flight_conversation_item(sess: SessionState) -> dict[str, Any] | None:
+    """Structured item for the current unfinished question (if any)."""
+    if sess.reflection is not None:
+        ref = sess.reflection
+        return _question_history_item(
+            ref.question,
+            status="reflection",
+            messages=ref.transcript,
+            correct=ref.assessment.correct,
+            explicit_rating=ref.grading.explicit_rating,
+            assisted=ref.assisted,
+        )
+    if sess.pending_grading is not None:
+        pg = sess.pending_grading
+        return _question_history_item(
+            pg.question,
+            status="awaiting_rating",
+            messages=pg.dialogue_transcript,
+            correct=pg.assessment.correct,
+            assisted=pg.assisted,
+        )
+    if sess.pending_question is not None:
+        return _question_history_item(
+            sess.pending_question,
+            status="in_progress",
+            messages=sess.active_transcript,
+            assisted=sess.tutor_mode,
+        )
+    return None
+
+
+def _commit_in_flight_to_conversation(sess: SessionState) -> None:
+    """Finalize current in-flight question into committed conversation items."""
+    item = _in_flight_conversation_item(sess)
+    if item is None:
+        return
+    item["status"] = "completed"
+    # Prefer grading fields when leaving reflection; keep assessment correct otherwise.
+    if sess.reflection is not None:
+        item["correct"] = sess.reflection.assessment.correct
+        item["explicit_rating"] = sess.reflection.grading.explicit_rating
+        item["assisted"] = sess.reflection.assisted
+        item["messages"] = _messages_copy(sess.reflection.transcript)
+    elif sess.pending_grading is not None:
+        item["correct"] = sess.pending_grading.assessment.correct
+        item["assisted"] = sess.pending_grading.assisted
+        item["messages"] = _messages_copy(sess.pending_grading.dialogue_transcript)
+    # Drop any prior incomplete entry for the same question number.
+    qn = item["question_number"]
+    sess.conversation_items = [
+        existing
+        for existing in sess.conversation_items
+        if int(existing.get("question_number") or 0) != qn
+    ]
+    sess.conversation_items.append(item)
+
+
+def _conversation_view_items(sess: SessionState) -> list[dict[str, Any]]:
+    """Committed items plus current in-flight (for disk + transcript API)."""
+    items = [dict(item) for item in sess.conversation_items]
+    inflight = _in_flight_conversation_item(sess)
+    if inflight is None:
+        return items
+    qn = inflight["question_number"]
+    items = [existing for existing in items if int(existing.get("question_number") or 0) != qn]
+    items.append(inflight)
+    items.sort(key=lambda row: int(row.get("question_number") or 0))
+    return items
+
+
+def _serialize_runtime(sess: SessionState) -> dict[str, Any]:
+    pending_grading = None
+    if sess.pending_grading is not None:
+        pg = sess.pending_grading
+        pending_grading = {
+            "question": _serialize_question(pg.question),
+            "learner_response": pg.learner_response,
+            "assessment": _serialize_assessment(pg.assessment),
+            "dialogue_transcript": list(pg.dialogue_transcript),
+            "assisted": pg.assisted,
+        }
+    reflection = None
+    if sess.reflection is not None:
+        ref = sess.reflection
+        reflection = {
+            "question": _serialize_question(ref.question),
+            "assessment": _serialize_assessment(ref.assessment),
+            "grading": _serialize_grading(ref.grading),
+            "transcript": list(ref.transcript),
+            "assisted": ref.assisted,
+        }
+    return {
+        "question_count": sess.question_count,
+        "scalar": sess.scalar,
+        "awaiting_skip_reason": sess.awaiting_skip_reason,
+        "tutor_mode": sess.tutor_mode,
+        "active_concept_id": sess.active_concept_id,
+        "active_transcript": list(sess.active_transcript),
+        "conversation_items": list(sess.conversation_items),
+        "pending_question": (
+            _serialize_question(sess.pending_question)
+            if sess.pending_question is not None
+            else None
+        ),
+        "pending_grading": pending_grading,
+        "reflection": reflection,
+    }
+
+
+def _persist_session(sess: SessionState) -> None:
+    """Write conversation + runtime snapshot (or clear runtime when ended)."""
+    state.write_conversation_items(sess.state_path, _conversation_view_items(sess))
+    if sess.status != "active":
+        state.write_runtime(sess.state_path, None)
+        return
+    state.write_runtime(sess.state_path, _serialize_runtime(sess))
+
+
+def _session_ui_phase(sess: SessionState) -> str:
+    if sess.reflection is not None:
+        return "reflection"
+    if sess.pending_grading is not None:
+        return "graded"
+    if sess.awaiting_skip_reason:
+        return "skip_prompt"
+    if sess.pending_question is not None:
+        return "dialogue"
+    return "idle"
+
+
+def _session_dialogue_messages(sess: SessionState) -> list[dict[str, str]]:
+    if sess.reflection is not None:
+        return list(sess.reflection.transcript)
+    if sess.pending_grading is not None:
+        return list(sess.pending_grading.dialogue_transcript)
+    if sess.pending_question is not None:
+        return list(sess.active_transcript)
+    return []
+
+
+def _pending_question_view(sess: SessionState) -> PendingQuestionView | None:
+    q: GeneratedQuestion | None = None
+    if sess.pending_question is not None:
+        q = sess.pending_question
+    elif sess.pending_grading is not None:
+        q = sess.pending_grading.question
+    elif sess.reflection is not None:
+        q = sess.reflection.question
+    if q is None:
+        return None
+    return PendingQuestionView(
+        question_number=q.question_number,
+        question_id=q.question_id,
+        concept_id=q.concept_id,
+        concept_label=q.concept_label,
+        concept=q.concept_label,
+        question_type=q.question_type,
+        intended_difficulty=q.intended_difficulty,
+        question_text=q.question_text,
+    )
+
+
+def _resume_history_items(sess: SessionState) -> list[ResumeHistoryItem]:
+    """Build Study sidebar history from graded completed conversation items."""
+    log_by_qn: dict[int, dict[str, str]] = {}
+    for row in state.parse_question_log(sess.state_path):
+        try:
+            qn = int(row.get("Q#") or 0)
+        except (TypeError, ValueError):
+            continue
+        if qn > 0:
+            log_by_qn[qn] = row
+
+    history: list[ResumeHistoryItem] = []
+    for item in sess.conversation_items:
+        status = str(item.get("status") or "completed")
+        if status != "completed":
+            continue
+        try:
+            qn = int(item.get("question_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if qn <= 0:
+            continue
+        log = log_by_qn.get(qn, {})
+        rating = str(item.get("explicit_rating") or log.get("explicit_rating") or "").strip()
+        if not rating:
+            # Abandoned in-flight commits (end early) have no rating — skip.
+            continue
+        correct = str(item.get("correct") or log.get("correct") or "no").strip() or "no"
+        reward: float | None = None
+        raw_reward = log.get("reward_R")
+        if raw_reward not in (None, ""):
+            try:
+                reward = float(raw_reward)
+            except (TypeError, ValueError):
+                reward = None
+        history.append(
+            ResumeHistoryItem(
+                question_number=qn,
+                question_text=str(item.get("question_text") or ""),
+                explicit_rating=rating,
+                correct=correct,
+                reward=reward,
+            )
+        )
+    history.sort(key=lambda h: h.question_number)
+    return history
+
+
+def _resume_session_response(sess: SessionState) -> ResumeSessionResponse:
+    base = _session_state_response(sess)
+    correct = hint_count = turn_count = hedging_count = None
+    flag_reason = assisted = explicit_rating = reward = new_difficulty = None
+    if sess.pending_grading is not None:
+        a = sess.pending_grading.assessment
+        correct = a.correct
+        hint_count = a.hint_count
+        turn_count = a.turn_count
+        hedging_count = a.hedging_count
+        flag_reason = a.flag_reason
+        assisted = sess.pending_grading.assisted
+    elif sess.reflection is not None:
+        a = sess.reflection.assessment
+        g = sess.reflection.grading
+        correct = a.correct
+        hint_count = a.hint_count
+        turn_count = a.turn_count
+        hedging_count = a.hedging_count
+        flag_reason = a.flag_reason
+        assisted = sess.reflection.assisted
+        explicit_rating = g.explicit_rating
+        reward = g.reward
+        new_difficulty = g.new_difficulty
+    return ResumeSessionResponse(
+        **base.model_dump(),
+        phase=_session_ui_phase(sess),  # type: ignore[arg-type]
+        pending_question=_pending_question_view(sess),
+        dialogue_messages=[
+            DialogueMessageView(role=m["role"], content=m["content"])
+            for m in _session_dialogue_messages(sess)
+            if m.get("role") and m.get("content") is not None
+        ],
+        awaiting_skip_reason=sess.awaiting_skip_reason,
+        tutor_mode=sess.tutor_mode,
+        history=_resume_history_items(sess),
+        correct=correct,
+        hint_count=hint_count,
+        turn_count=turn_count,
+        hedging_count=hedging_count,
+        flag_reason=flag_reason,
+        assisted=assisted,
+        explicit_rating=explicit_rating,
+        reward=reward,
+        new_difficulty=new_difficulty,
+    )
+
+
+def _apply_runtime_to_session(sess: SessionState, runtime: dict[str, Any]) -> None:
+    """Restore in-flight fields from a persisted runtime snapshot."""
+    sess.question_count = int(runtime.get("question_count") or sess.question_count)
+    if "scalar" in runtime:
+        try:
+            sess.scalar = float(runtime["scalar"])
+        except (TypeError, ValueError):
+            pass
+    sess.awaiting_skip_reason = bool(runtime.get("awaiting_skip_reason") or False)
+    sess.tutor_mode = bool(runtime.get("tutor_mode") or False)
+    active_concept = runtime.get("active_concept_id")
+    sess.active_concept_id = str(active_concept) if active_concept else None
+    transcript = runtime.get("active_transcript") or []
+    sess.active_transcript = (
+        [{"role": str(m.get("role", "")), "content": str(m.get("content", ""))} for m in transcript]
+        if isinstance(transcript, list)
+        else []
+    )
+    conv_items = runtime.get("conversation_items")
+    if isinstance(conv_items, list):
+        sess.conversation_items = [item for item in conv_items if isinstance(item, dict)]
+    elif isinstance(runtime.get("conversation_md"), str):
+        # Legacy runtime field; ignore prose — completed items come from disk.
+        sess.conversation_items = state.read_conversation_items(sess.state_path)
+        sess.conversation_items = [
+            item
+            for item in sess.conversation_items
+            if item.get("status") == "completed"
+        ]
+
+    pq = runtime.get("pending_question")
+    sess.pending_question = _deserialize_question(pq) if isinstance(pq, dict) else None
+
+    pg = runtime.get("pending_grading")
+    if isinstance(pg, dict) and isinstance(pg.get("question"), dict):
+        sess.pending_grading = PendingGrading(
+            question=_deserialize_question(pg["question"]),
+            learner_response=str(pg.get("learner_response") or ""),
+            assessment=_deserialize_assessment(pg.get("assessment") or {}),
+            dialogue_transcript=[
+                {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+                for m in (pg.get("dialogue_transcript") or [])
+                if isinstance(m, dict)
+            ],
+            assisted=bool(pg.get("assisted") or False),
+        )
+    else:
+        sess.pending_grading = None
+
+    ref = runtime.get("reflection")
+    if isinstance(ref, dict) and isinstance(ref.get("question"), dict):
+        sess.reflection = ReflectionState(
+            question=_deserialize_question(ref["question"]),
+            assessment=_deserialize_assessment(ref.get("assessment") or {}),
+            grading=_deserialize_grading(ref.get("grading") or {}),
+            transcript=[
+                {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+                for m in (ref.get("transcript") or [])
+                if isinstance(m, dict)
+            ],
+            assisted=bool(ref.get("assisted") or False),
+        )
+    else:
+        sess.reflection = None
+
+
+def _reactivate_session_on_disk(path: Path) -> None:
+    """Clear ended_early lifecycle fields so the session can continue."""
+    state.write_session_status(path, status="active", ended_at="")
+
+
+def _hydrate_session_from_disk(session_id: str) -> SessionState:
+    """Rebuild a SessionState from its persisted markdown file.
+
+    Accepts ``active`` and ``ended_early`` (reactivated to active). Rejects
+    ``completed`` sessions.
+    """
+    path = SESSIONS_DIR / f"{session_id}.md"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Session not found")
+    meta = state.read_session_meta(path)
+    status, ended_at = _session_status_from_meta(meta)
+    if status == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Session is completed; start a new session to continue",
+        )
+    if status not in ("active", "ended_early"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session is {status}; start a new session to continue",
+        )
+    if status == "ended_early":
+        _reactivate_session_on_disk(path)
+        status = "active"
+        ended_at = None
+
+    knowledge_source = meta.get("knowledge_source") or ""
+    if not knowledge_source:
+        raise HTTPException(status_code=400, detail="Session missing knowledge_source")
+    try:
+        chapter = resolve_chapter(knowledge_source, PROGRAM_ROOT)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        max_questions = int(meta.get("max_questions") or "10")
+    except ValueError:
+        max_questions = 10
+    focus_mode = meta.get("focus_mode") or "adaptive"
+    if focus_mode not in ("adaptive", "weak_points"):
+        focus_mode = "adaptive"
+    concept_ids = state.parse_concept_ids(meta.get("concept_ids"))
+    try:
+        scalar = state.read_scalar(path)
+    except ValueError:
+        scalar = 0.5
+
+    log_rows = state.parse_question_log(path)
+    question_count = len(log_rows)
+
+    sess = SessionState(
+        session_id=session_id,
+        title=state.read_title(path),
+        knowledge_source=knowledge_source,
+        chapter=chapter,
+        state_path=path,
+        scalar=scalar,
+        question_count=question_count,
+        created_at=meta.get("created_at") or "",
+        focus_mode=focus_mode,
+        max_questions=max_questions,
+        concept_ids=concept_ids,
+        status=status,
+        ended_at=ended_at,
+        asked_question_ids=state.read_asked_ids(path),
+        metadata={
+            "fixture_commit": _upstream_commit_for_knowledge_source(knowledge_source),
+        },
+    )
+    runtime = state.read_runtime(path)
+    if runtime:
+        _apply_runtime_to_session(sess, runtime)
+    else:
+        # Between questions (or never started): Conversation JSON is committed-only.
+        sess.conversation_items = [
+            item
+            for item in state.read_conversation_items(path)
+            if item.get("status") == "completed"
+        ]
+    return sess
+
+
 def _clear_in_flight_question(sess: SessionState) -> None:
     """Drop unfinished question state without writing a question-log row.
 
@@ -373,11 +884,13 @@ def _mark_session_ended(
     ended_at: str | None = None,
 ) -> str:
     """Persist lifecycle status and clear in-flight question state."""
+    _commit_in_flight_to_conversation(sess)
     stamp = ended_at or datetime.now(timezone.utc).isoformat()
     state.write_session_status(sess.state_path, status=status, ended_at=stamp)
     sess.status = status
     sess.ended_at = stamp
     _clear_in_flight_question(sess)
+    _persist_session(sess)
     return stamp
 
 
@@ -822,6 +1335,9 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
         metadata={"fixture_commit": fixture_commit},
     )
     sessions[session_id] = sess
+    # Persist before spawning the title job so the background writer cannot
+    # race with the initial Conversation/Runtime snapshot.
+    _persist_session(sess)
     title_pending = _start_session_title_job(sess)
     return CreateSessionResponse(
         session_id=session_id,
@@ -921,6 +1437,7 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
     sess.tutor_mode = False
     sess.active_concept_id = generated.concept_id
     sess.question_count = question_number
+    _persist_session(sess)
 
     return QuestionResponse(
         question_number=generated.question_number,
@@ -938,7 +1455,15 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
 def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
     sess = _get_session(session_id)
     _require_active_session(sess)
+    try:
+        return _post_turn_inner(sess, body)
+    finally:
+        # Keep disk conversation/runtime in sync after every mutation path.
+        if session_id in sessions:
+            _persist_session(sess)
 
+
+def _post_turn_inner(sess: SessionState, body: TurnRequest) -> TurnResponse:
     learner_message = (body.learner_message or body.learner_response or "").strip()
     skip_reason = (body.skip_reason or "").strip()
     has_message = bool(learner_message)
@@ -969,6 +1494,7 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
             )
         reflection = sess.reflection
         grading = reflection.grading
+        _commit_in_flight_to_conversation(sess)
         sess.reflection = None
         sess.tutor_mode = False
         if grading.question_number >= sess.max_questions:
@@ -998,7 +1524,7 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
 
         pending_grade = sess.pending_grading
         grading = finalize_turn(
-            session_id=session_id,
+            session_id=sess.session_id,
             question=pending_grade.question,
             assessment=pending_grade.assessment,
             explicit_rating=rating_raw,  # type: ignore[arg-type]
@@ -1195,6 +1721,36 @@ def get_session_state(session_id: str) -> SessionStateResponse:
     return _session_state_response(sess)
 
 
+@app.post("/sessions/{session_id}/resume", response_model=ResumeSessionResponse)
+def resume_session(session_id: str) -> ResumeSessionResponse:
+    """Hydrate a resumable session from disk into memory (idempotent if already live).
+
+    Resumable: ``active`` or ``ended_early`` (reactivated). ``completed`` → 409.
+    """
+    try:
+        uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session_id in sessions:
+        sess = sessions[session_id]
+        if sess.status == "completed":
+            raise HTTPException(
+                status_code=409,
+                detail="Session is completed; start a new session to continue",
+            )
+        if sess.status == "ended_early":
+            _reactivate_session_on_disk(sess.state_path)
+            sess.status = "active"
+            sess.ended_at = None
+        _require_active_session(sess)
+        return _resume_session_response(sess)
+
+    sess = _hydrate_session_from_disk(session_id)
+    sessions[session_id] = sess
+    return _resume_session_response(sess)
+
+
 @app.get("/learner/mastery", response_model=LearnerMasteryResponse)
 def get_learner_mastery(knowledge_source: str) -> LearnerMasteryResponse:
     """Derive-on-read BKT mastery for all concepts in a chapter."""
@@ -1378,6 +1934,42 @@ def list_sessions() -> SessionListResponse:
     return SessionListResponse(sessions=summaries)
 
 
+def _history_question_views(items: list[dict[str, Any]]) -> list[SessionHistoryQuestionView]:
+    views: list[SessionHistoryQuestionView] = []
+    for item in items:
+        try:
+            qn = int(item.get("question_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        status_raw = str(item.get("status") or "completed")
+        if status_raw not in ("completed", "in_progress", "awaiting_rating", "reflection"):
+            status_raw = "completed"
+        messages = [
+            SessionHistoryMessageView(
+                role=str(m.get("role") or ""),
+                content=str(m.get("content") or ""),
+            )
+            for m in (item.get("messages") or [])
+            if isinstance(m, dict)
+        ]
+        views.append(
+            SessionHistoryQuestionView(
+                question_number=qn,
+                question_id=str(item.get("question_id") or ""),
+                question_text=str(item.get("question_text") or ""),
+                concept_id=str(item.get("concept_id") or ""),
+                concept_label=str(item.get("concept_label") or ""),
+                correct=item.get("correct"),
+                explicit_rating=item.get("explicit_rating"),
+                assisted=bool(item.get("assisted") or False),
+                status=status_raw,  # type: ignore[arg-type]
+                messages=messages,
+            )
+        )
+    views.sort(key=lambda q: q.question_number)
+    return views
+
+
 @app.get("/sessions/{session_id}/transcript", response_model=SessionTranscriptResponse)
 def get_session_transcript(session_id: str) -> SessionTranscriptResponse:
     """Read-only transcript of a persisted session (works after server restart)."""
@@ -1394,6 +1986,10 @@ def get_session_transcript(session_id: str) -> SessionTranscriptResponse:
     except ValueError:
         max_questions = 0
     status, ended_at = _session_status_from_meta(meta)
+    if session_id in sessions:
+        question_items = _conversation_view_items(sessions[session_id])
+    else:
+        question_items = state.read_conversation_items(path)
     return SessionTranscriptResponse(
         session_id=session_id,
         title=state.read_title(path),
@@ -1404,6 +2000,7 @@ def get_session_transcript(session_id: str) -> SessionTranscriptResponse:
         status=status,  # type: ignore[arg-type]
         ended_at=ended_at,
         body=path.read_text(encoding="utf-8"),
+        questions=_history_question_views(question_items),
     )
 
 

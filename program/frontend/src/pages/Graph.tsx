@@ -252,24 +252,20 @@ export function Graph() {
 
   return (
     <GraphShell>
-      <nav className="graph-breadcrumb" aria-label="Graph navigation">
-        {inChapterView ? (
-          <>
-            <button type="button" className="graph-breadcrumb__link" onClick={goOverview}>
-              {domainLabel}
-            </button>
-            <span className="graph-breadcrumb__sep" aria-hidden="true">
-              /
-            </span>
-            <span className="graph-breadcrumb__current">{focus.chapterId}</span>
-            <button type="button" className="graph-breadcrumb__back" onClick={goOverview}>
-              Back
-            </button>
-          </>
-        ) : (
-          <span className="graph-breadcrumb__current">{domainLabel}</span>
-        )}
-      </nav>
+      {inChapterView && (
+        <nav className="graph-breadcrumb" aria-label="Graph navigation">
+          <button type="button" className="graph-breadcrumb__link" onClick={goOverview}>
+            {domainLabel}
+          </button>
+          <span className="graph-breadcrumb__sep" aria-hidden="true">
+            /
+          </span>
+          <span className="graph-breadcrumb__current">{focus.chapterId}</span>
+          <button type="button" className="graph-breadcrumb__back" onClick={goOverview}>
+            Back
+          </button>
+        </nav>
+      )}
 
       {chapterEmpty ? (
         <GraphEmpty

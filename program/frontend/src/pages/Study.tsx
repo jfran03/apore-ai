@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createSession,
   fetchQuestion,
   postTurn,
   getSessionState,
   endSession,
+  resumeSession,
   setStoredKnowledgeSource,
   getWikiPreview,
   getQuestionBank,
@@ -15,9 +16,10 @@ import type {
   ConceptMasteryDelta,
   MasteryBand,
   QuestionResponse,
+  ResumeSessionResponse,
   TurnResponse,
 } from '../api/types';
-import { useActiveDomain } from '../shell/ActiveDomainContext';
+import { parseKnowledgeSource, useActiveDomain } from '../shell/ActiveDomainContext';
 import { useStudyFocus } from '../shell/StudyFocusContext';
 import { QuestionCard } from '../components/QuestionCard';
 import { QuestionHistoryCard, type HistoryRecord } from '../components/QuestionHistoryCard';
@@ -68,7 +70,7 @@ interface SessionState {
   chatStatus: ChatStatus;
   pendingReveal: string | null;
   skipPrompt: boolean;
-  phase: 'dialogue' | 'rating' | 'reflection';
+  phase: 'idle' | 'dialogue' | 'rating' | 'reflection';
   graded: GradeResult | null;
   /** True while Socratic tutor help is active for the open question */
   tutorMode: boolean;
@@ -160,10 +162,113 @@ function gradeFromTurn(res: TurnResponse): GradeResult {
   };
 }
 
+function sessionFromResume(res: ResumeSessionResponse): SessionState {
+  const pq = res.pending_question;
+  const currentQuestion = pq
+    ? {
+        question_number: pq.question_number,
+        question_text: pq.question_text,
+        concept_id: pq.concept_id,
+        concept_label: pq.concept_label,
+        question_type: pq.question_type,
+        intended_difficulty: pq.intended_difficulty,
+      }
+    : null;
+
+  const dialogueMessages: DialogueMessage[] = res.dialogue_messages.map((m) => ({
+    id: nextMessageId(),
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: m.content,
+  }));
+
+  let phase: SessionState['phase'] = 'dialogue';
+  if (res.phase === 'idle') phase = 'idle';
+  else if (res.phase === 'graded') phase = 'rating';
+  else if (res.phase === 'reflection') phase = 'reflection';
+
+  const graded: GradeResult | null =
+    res.phase === 'graded' || res.phase === 'reflection'
+      ? {
+          question_number: pq?.question_number ?? res.question_count,
+          correct: res.correct ?? 'no',
+          hint_count: res.hint_count ?? 0,
+          turn_count: res.turn_count ?? 0,
+          hedging_count: res.hedging_count ?? 0,
+          flag_reason: res.flag_reason ?? null,
+          assisted: res.assisted === true,
+        }
+      : null;
+
+  const lastLearner =
+    [...res.dialogue_messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+
+  const ratingContext =
+    phase === 'rating' && currentQuestion
+      ? {
+          question_number: currentQuestion.question_number,
+          question_text: currentQuestion.question_text,
+          lastLearnerMessage: lastLearner,
+        }
+      : null;
+
+  let pendingAdvance: SessionState['pendingAdvance'] = null;
+  if (
+    phase === 'reflection' &&
+    currentQuestion &&
+    (res.explicit_rating === 'easy' ||
+      res.explicit_rating === 'ok' ||
+      res.explicit_rating === 'hard')
+  ) {
+    pendingAdvance = {
+      question_number: currentQuestion.question_number,
+      question_text: currentQuestion.question_text,
+      explicit_rating: res.explicit_rating,
+      correct: res.correct ?? 'no',
+      reward: res.reward ?? undefined,
+    };
+  }
+
+  const history: HistoryRecord[] = (res.history ?? []).map((h) => ({
+    question_number: h.question_number,
+    question_text: h.question_text,
+    explicit_rating: h.explicit_rating,
+    correct: h.correct,
+    reward: h.reward ?? undefined,
+  }));
+
+  return {
+    sessionId: res.session_id,
+    title: res.title,
+    maxQuestions: res.max_questions,
+    scalar: res.new_difficulty ?? res.scalar,
+    questionCount: res.question_count,
+    currentQuestion,
+    history,
+    dialogueMessages,
+    chatStatus: 'idle',
+    pendingReveal: null,
+    skipPrompt: res.phase === 'skip_prompt' || res.awaiting_skip_reason,
+    phase,
+    graded,
+    tutorMode: res.tutor_mode,
+    ratingContext,
+    pendingAdvance,
+    masteryDelta: res.mastery_delta ?? {},
+  };
+}
+
 export function Study() {
   const navigate = useNavigate();
-  const { activeDomain, activeChapter, activeChapterId, setActiveChapterId, catalogError, refreshSessions } =
-    useActiveDomain();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    activeDomain,
+    activeChapter,
+    activeChapterId,
+    setActiveChapterId,
+    selectDomainChapter,
+    catalogError,
+    refreshSessions,
+  } = useActiveDomain();
   const { setFocused, setOnExitRequest } = useStudyFocus();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('adaptive');
@@ -181,6 +286,8 @@ export function Study() {
   const [exitError, setExitError] = useState<string | null>(null);
   const [startLoading, setStartLoading] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const [questionLoading, setQuestionLoading] = useState(false);
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
@@ -188,6 +295,9 @@ export function Study() {
   const pendingAfterReveal = useRef<(() => void) | null>(null);
   const titlePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exitContinueRef = useRef<HTMLButtonElement>(null);
+  /** Session ids that fully entered the live pipeline (incl. idle→question). */
+  const attachedSessionRef = useRef<string | null>(null);
+  const resumeSessionId = searchParams.get('session');
 
   const selectedChapter = activeChapter;
   const selectableConceptIds = useMemo(
@@ -326,6 +436,91 @@ export function Study() {
     };
   }, [stopTitlePoll]);
 
+  useEffect(() => {
+    if (!resumeSessionId) return;
+    // Already live with this id (create or a prior completed attach). Skip.
+    if (
+      attachedSessionRef.current === resumeSessionId &&
+      session?.sessionId === resumeSessionId
+    ) {
+      return;
+    }
+
+    // Strict Mode remounts cancel the first run; a cancelled idle fetch must not
+    // block the second run. Only mark attached after the full enter-live path.
+    let cancelled = false;
+
+    async function attach() {
+      setResumeLoading(true);
+      setResumeError(null);
+      setSessionComplete(null);
+      setStartError(null);
+      stopTitlePoll();
+      try {
+        const res = await resumeSession(resumeSessionId!);
+        if (cancelled) return;
+        setStoredKnowledgeSource(res.knowledge_source);
+        const parsed = parseKnowledgeSource(res.knowledge_source);
+        if (parsed) {
+          selectDomainChapter(parsed.domainId, parsed.chapterId);
+        }
+        setSession(sessionFromResume(res));
+        setSearchParams({ session: res.session_id }, { replace: true });
+        void refreshSessions();
+
+        if (res.phase === 'idle' && res.questions_remaining > 0) {
+          setQuestionLoading(true);
+          setQuestionError(null);
+          try {
+            const q = await fetchQuestion(res.session_id, {});
+            if (cancelled) return;
+            setSession((prev) => {
+              if (!prev || prev.sessionId !== res.session_id) return prev;
+              return {
+                ...prev,
+                questionCount: q.question_number,
+                currentQuestion: buildCurrentQuestion(q),
+                dialogueMessages: [],
+                phase: 'dialogue',
+                skipPrompt: false,
+                graded: null,
+                tutorMode: false,
+                ratingContext: null,
+                pendingAdvance: null,
+              };
+            });
+          } catch (err) {
+            if (!cancelled) {
+              setQuestionError(err instanceof Error ? err.message : 'Failed to load question');
+            }
+          } finally {
+            if (!cancelled) setQuestionLoading(false);
+          }
+        } else if (res.title_pending) {
+          startTitlePoll(res.session_id);
+        }
+
+        if (!cancelled) {
+          attachedSessionRef.current = res.session_id;
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setResumeError(err instanceof Error ? err.message : 'Failed to resume session');
+          attachedSessionRef.current = null;
+          setSearchParams({}, { replace: true });
+        }
+      } finally {
+        if (!cancelled) setResumeLoading(false);
+      }
+    }
+
+    void attach();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- attach when ?session= changes
+  }, [resumeSessionId]);
+
   const loadNextQuestion = useCallback(async (sessionId: string) => {
     setQuestionLoading(true);
     setQuestionError(null);
@@ -375,6 +570,9 @@ export function Study() {
         concept_ids: selectedConceptIds,
       });
       void refreshSessions();
+      // Mark attached before setting ?session= so the resume effect does not re-enter.
+      attachedSessionRef.current = res.session_id;
+      setSearchParams({ session: res.session_id }, { replace: true });
       setSession({
         sessionId: res.session_id,
         title: res.title,
@@ -387,7 +585,7 @@ export function Study() {
         chatStatus: 'idle',
         pendingReveal: null,
         skipPrompt: false,
-        phase: 'dialogue',
+        phase: 'idle',
         graded: null,
         tutorMode: false,
         ratingContext: null,
@@ -402,11 +600,12 @@ export function Study() {
       try {
         const q = await fetchQuestion(res.session_id, {});
         setSession((prev) => {
-          if (!prev) return prev;
+          if (!prev || prev.sessionId !== res.session_id) return prev;
           return {
             ...prev,
             questionCount: q.question_number,
             currentQuestion: buildCurrentQuestion(q),
+            phase: 'dialogue',
           };
         });
       } catch (err) {
@@ -428,10 +627,13 @@ export function Study() {
     startTitlePoll,
     stopTitlePoll,
     refreshSessions,
+    setSearchParams,
   ]);
 
   const handleNewSession = useCallback(() => {
     stopTitlePoll();
+    attachedSessionRef.current = null;
+    setSearchParams({}, { replace: true });
     setSession(null);
     setSessionComplete(null);
     setExitConfirmOpen(false);
@@ -441,7 +643,7 @@ export function Study() {
     setQuestionError(null);
     setSubmitError(null);
     setPreambleStep('mode');
-  }, [stopTitlePoll]);
+  }, [stopTitlePoll, setSearchParams]);
 
   useEffect(() => {
     setFocused(session != null);
@@ -476,6 +678,7 @@ export function Study() {
     try {
       const ended = await endSession(session.sessionId);
       stopTitlePoll();
+      attachedSessionRef.current = null;
       setExitConfirmOpen(false);
       setSession(null);
       await refreshSessions();
@@ -666,6 +869,8 @@ export function Study() {
 
       if (turnRes.phase === 'session_complete') {
         stopTitlePoll();
+        attachedSessionRef.current = null;
+        setSearchParams({}, { replace: true });
         let masteryItems: MasteryDeltaItem[] = masteryItemsFromDelta(
           session.masteryDelta,
           conceptOptions,
@@ -711,7 +916,7 @@ export function Study() {
 
       await loadNextQuestion(session.sessionId);
     },
-    [session, loadNextQuestion, stopTitlePoll, conceptOptions],
+    [session, loadNextQuestion, stopTitlePoll, conceptOptions, setSearchParams],
   );
 
   const handleSubmitRating = useCallback(
@@ -808,6 +1013,14 @@ export function Study() {
   }
 
   if (!session) {
+    if (resumeLoading) {
+      return (
+        <main className="study-page study-preamble-page">
+          <p className="page__subtitle">Resuming session…</p>
+        </main>
+      );
+    }
+
     if (preambleStep === 'mode') {
       return (
         <main className="study-page study-preamble-page">
@@ -818,6 +1031,7 @@ export function Study() {
             </header>
 
             {catalogError && <p className="study-start__error">{catalogError}</p>}
+            {resumeError && <p className="study-start__error">{resumeError}</p>}
 
             <div className="study-mode-grid">
               <button
@@ -1060,7 +1274,9 @@ export function Study() {
           >
             {startLoading ? 'Starting…' : 'Start'}
           </button>
-          {startError && <p className="study-start__error">{startError}</p>}
+          {(startError || resumeError) && (
+            <p className="study-start__error">{startError ?? resumeError}</p>
+          )}
         </div>
       </main>
     );
@@ -1125,7 +1341,7 @@ export function Study() {
         </div>
 
         <div className="study-layout__chat">
-          {showChat && (
+          {showChat && phase !== 'idle' && (
             <TutorChatCard
               messages={dialogueMessages}
               chatStatus={chatStatus}

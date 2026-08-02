@@ -57,19 +57,39 @@ function DomainsSkeleton() {
   );
 }
 
-function SessionRows({ sessions }: { sessions: SessionSummary[] }) {
+function SessionRows({
+  sessions,
+  onNavigate,
+}: {
+  sessions: SessionSummary[];
+  onNavigate?: () => void;
+}) {
+  const { selectDomainChapter } = useActiveDomain();
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? sessions : sessions.slice(0, VISIBLE_SESSIONS);
 
   return (
     <ul className="sidebar__sessions">
       {visible.map((s) => {
-        const chapterId = parseKnowledgeSource(s.knowledge_source)?.chapterId;
+        const parsed = parseKnowledgeSource(s.knowledge_source);
+        const chapterId = parsed?.chapterId;
         return (
           <li key={s.session_id}>
-            <Link to={`/sessions/${s.session_id}`} className="sidebar__session">
+            <Link
+              to={`/sessions/${s.session_id}`}
+              className="sidebar__session"
+              onClick={() => {
+                if (parsed) {
+                  selectDomainChapter(parsed.domainId, parsed.chapterId);
+                }
+                onNavigate?.();
+              }}
+            >
               <span className="sidebar__session-title" title={s.title}>
-                {s.title}
+                {s.status === 'active' && (
+                  <span className="sidebar__session-status" aria-label="In progress" title="In progress" />
+                )}
+                <span className="sidebar__session-title-text">{s.title}</span>
               </span>
               {chapterId && <span className="sidebar__session-chapter">{chapterId}</span>}
               <span className="sidebar__session-age">{formatRelativeAge(s.created_at)}</span>
@@ -114,12 +134,14 @@ function DomainRow({
   sessions,
   onSelect,
   onSessionsChanged,
+  onNavigate,
 }: {
   domainId: string;
   active: boolean;
   sessions: SessionSummary[];
   onSelect: () => void;
   onSessionsChanged: () => Promise<void>;
+  onNavigate?: () => void;
 }) {
   const { setActiveDomainId, refreshCatalog } = useActiveDomain();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -269,7 +291,7 @@ function DomainRow({
           </div>
           {rowError && <p className="sidebar__new-domain-error">{rowError}</p>}
         </form>
-        <SessionRows sessions={sessions} />
+        <SessionRows sessions={sessions} onNavigate={onNavigate} />
       </li>
     );
   }
@@ -277,13 +299,16 @@ function DomainRow({
   return (
     <li>
       <div className={`sidebar__domain-row${active ? ' sidebar__domain-row--active' : ''}`}>
-        <button
-          type="button"
+        <Link
+          to="/graph"
           className={`sidebar__domain${active ? ' sidebar__domain--active' : ''}`}
-          onClick={onSelect}
+          onClick={() => {
+            onSelect();
+            onNavigate?.();
+          }}
         >
           {domainId}
-        </button>
+        </Link>
         <div className="sidebar__domain-menu" ref={menuRef}>
           <button
             ref={triggerRef}
@@ -328,7 +353,7 @@ function DomainRow({
           )}
         </div>
       </div>
-      <SessionRows sessions={sessions} />
+      <SessionRows sessions={sessions} onNavigate={onNavigate} />
 
       {pendingDelete && (
         <div
@@ -385,7 +410,7 @@ function DomainRow({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const {
     catalog,
     activeDomainId,
@@ -427,6 +452,7 @@ export function Sidebar() {
                 sessions={grouped.get(d.id) ?? []}
                 onSelect={() => setActiveDomainId(d.id)}
                 onSessionsChanged={refreshSessions}
+                onNavigate={onNavigate}
               />
             ))}
           </ul>

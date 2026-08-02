@@ -189,6 +189,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: auto;
+  text-decoration: none;
+  border-radius: var(--radius-xs);
+}
+
+.topbar__domain:hover {
+  color: var(--color-ink);
+  text-decoration: none;
+}
+
+.topbar__domain:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .topbar__link {
@@ -285,11 +297,19 @@
   font-weight: var(--font-weight-medium);
   color: var(--color-body);
   text-align: left;
+  text-decoration: none;
+  cursor: pointer;
 }
 
 .sidebar__domain:hover {
   background-color: var(--color-hairline-soft);
   color: var(--color-ink);
+  text-decoration: none;
+}
+
+.sidebar__domain:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .sidebar__domain--active {
@@ -573,11 +593,26 @@
 }
 
 .sidebar__session-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   flex: 1;
+  min-width: 0;
+}
+
+.sidebar__session-title-text {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.sidebar__session-status {
+  flex: 0 0 auto;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--color-primary);
 }
 
 .sidebar__session-chapter {

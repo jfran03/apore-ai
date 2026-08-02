@@ -352,6 +352,30 @@ export interface SessionListResponse {
   sessions: SessionSummary[];
 }
 
+export type SessionHistoryQuestionStatus =
+  | 'completed'
+  | 'in_progress'
+  | 'awaiting_rating'
+  | 'reflection';
+
+export interface SessionHistoryMessage {
+  role: string;
+  content: string;
+}
+
+export interface SessionHistoryQuestion {
+  question_number: number;
+  question_id: string;
+  question_text: string;
+  concept_id: string;
+  concept_label: string;
+  correct?: string | null;
+  explicit_rating?: string | null;
+  assisted?: boolean;
+  status: SessionHistoryQuestionStatus;
+  messages: SessionHistoryMessage[];
+}
+
 export interface SessionTranscript {
   session_id: string;
   title: string;
@@ -362,6 +386,71 @@ export interface SessionTranscript {
   status?: SessionLifecycleStatus;
   ended_at?: string | null;
   body: string;
+  questions?: SessionHistoryQuestion[];
+}
+
+export interface DialogueMessageView {
+  role: string;
+  content: string;
+}
+
+export interface PendingQuestionView {
+  question_number: number;
+  question_id: string;
+  concept_id: string;
+  concept_label: string;
+  concept: string;
+  question_type: string;
+  intended_difficulty: number;
+  question_text: string;
+}
+
+export type ResumeSessionPhase =
+  | 'idle'
+  | 'dialogue'
+  | 'skip_prompt'
+  | 'graded'
+  | 'reflection';
+
+export interface ResumeHistoryItem {
+  question_number: number;
+  question_text: string;
+  explicit_rating: string;
+  correct: string;
+  reward?: number | null;
+}
+
+export interface ResumeSessionResponse {
+  session_id: string;
+  title: string;
+  scalar: number;
+  question_count: number;
+  mastery: Record<string, number>;
+  mastery_delta?: Record<string, ConceptMasteryDelta>;
+  knowledge_source: string;
+  focus_mode: 'adaptive' | 'weak_points' | string;
+  max_questions: number;
+  questions_remaining: number;
+  active_concept_id?: string | null;
+  concept_ids: string[];
+  title_pending?: boolean;
+  status: SessionLifecycleStatus;
+  ended_at?: string | null;
+  phase: ResumeSessionPhase;
+  pending_question: PendingQuestionView | null;
+  dialogue_messages: DialogueMessageView[];
+  awaiting_skip_reason: boolean;
+  tutor_mode: boolean;
+  history?: ResumeHistoryItem[];
+  correct?: string | null;
+  hint_count?: number | null;
+  turn_count?: number | null;
+  hedging_count?: number | null;
+  flag_reason?: string | null;
+  assisted?: boolean | null;
+  explicit_rating?: string | null;
+  reward?: number | null;
+  new_difficulty?: number | null;
 }
 
 export interface EndSessionResponse {

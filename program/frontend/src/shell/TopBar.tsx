@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { popover } from '../motion';
 import { useActiveDomain } from './ActiveDomainContext';
@@ -84,7 +84,7 @@ export function TopBar() {
                 exit={panelMotion.exit}
                 transition={panelMotion.transition}
               >
-                <Sidebar />
+                <Sidebar onNavigate={() => setNavOpen(false)} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -105,10 +105,15 @@ export function TopBar() {
               </NavLink>
             ))}
           </nav>
-          {activeDomain && (
-            <span className="topbar__domain" title={activeDomain.id}>
+          {activeDomain && pathname !== '/graph' && (
+            <Link
+              to="/graph"
+              className="topbar__domain"
+              title={activeDomain.id}
+              aria-label={`Open graph for ${activeDomain.id}`}
+            >
               {activeDomain.id}
-            </span>
+            </Link>
           )}
         </div>
       )}

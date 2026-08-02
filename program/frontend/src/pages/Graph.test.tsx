@@ -247,9 +247,7 @@ describe('Graph page', () => {
     expect(
       screen.queryByTestId('node-concept:01-set-theory:sets_definition'),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('navigation', { name: 'Graph navigation' })).toHaveTextContent(
-      'discrete-math',
-    );
+    expect(screen.queryByRole('navigation', { name: 'Graph navigation' })).not.toBeInTheDocument();
   });
 
   it('drills into a chapter and shows only that chapter’s concepts', async () => {

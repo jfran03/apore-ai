@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { KnowledgeCatalog, KnowledgeChapter, KnowledgeDomain, SessionSummary } from '../api/types';
@@ -9,6 +9,7 @@ const deleteDomain = vi.fn();
 const refreshCatalog = vi.fn();
 const refreshSessions = vi.fn();
 const setActiveDomainId = vi.fn();
+const selectDomainChapter = vi.fn();
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
@@ -74,14 +75,30 @@ let mockActiveDomain: {
   sessionsLoaded: boolean;
   activeDomainId: string | null;
   setActiveDomainId: typeof setActiveDomainId;
+  selectDomainChapter: typeof selectDomainChapter;
   refreshCatalog: typeof refreshCatalog;
   refreshSessions: typeof refreshSessions;
 };
 
-function renderSidebar() {
+function LocationDisplay() {
+  const { pathname } = useLocation();
+  return <div data-testid="location">{pathname}</div>;
+}
+
+function renderSidebar(onNavigate?: () => void, initialPath = '/study') {
   return render(
-    <MemoryRouter>
-      <Sidebar />
+    <MemoryRouter initialEntries={[initialPath]}>
+      <Routes>
+        <Route
+          path="*"
+          element={
+            <>
+              <Sidebar onNavigate={onNavigate} />
+              <LocationDisplay />
+            </>
+          }
+        />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -92,6 +109,7 @@ beforeEach(() => {
   refreshCatalog.mockReset().mockResolvedValue(undefined);
   refreshSessions.mockReset().mockResolvedValue(undefined);
   setActiveDomainId.mockReset();
+  selectDomainChapter.mockReset();
   mockActiveDomain = {
     catalog: {
       fixtures: [],
@@ -104,6 +122,7 @@ beforeEach(() => {
     sessionsLoaded: true,
     activeDomainId: 'alpha',
     setActiveDomainId,
+    selectDomainChapter,
     refreshCatalog,
     refreshSessions,
   };
@@ -114,32 +133,54 @@ describe('Sidebar domain menu', () => {
     mockActiveDomain.sessionsLoaded = false;
     const { container } = renderSidebar();
     expect(container.querySelector('.sidebar__skeleton')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'alpha' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'alpha' })).not.toBeInTheDocument();
   });
 
   it('renders cached domains and sessions without refetching on mount', async () => {
     renderSidebar();
 
-    expect(await screen.findByRole('button', { name: 'alpha' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'alpha' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Alpha practice/ })).toBeInTheDocument();
     expect(refreshSessions).not.toHaveBeenCalled();
   });
 
   it('keeps cached content when remounted', async () => {
     const { unmount } = renderSidebar();
-    expect(await screen.findByRole('button', { name: 'alpha' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'alpha' })).toBeInTheDocument();
     unmount();
 
     renderSidebar();
-    expect(screen.getByRole('button', { name: 'alpha' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'alpha' })).toBeInTheDocument();
     expect(document.querySelector('.sidebar__skeleton')).not.toBeInTheDocument();
     expect(refreshSessions).not.toHaveBeenCalled();
+  });
+
+  it('selects a domain, navigates to /graph, and invokes onNavigate', async () => {
+    const onNavigate = vi.fn();
+    renderSidebar(onNavigate);
+
+    await userEvent.click(await screen.findByRole('link', { name: 'beta' }));
+
+    expect(setActiveDomainId).toHaveBeenCalledWith('beta');
+    expect(screen.getByTestId('location')).toHaveTextContent('/graph');
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('synchronizes domain/chapter on session click and keeps the transcript route', async () => {
+    const onNavigate = vi.fn();
+    renderSidebar(onNavigate);
+
+    await userEvent.click(await screen.findByRole('link', { name: /Beta practice/ }));
+
+    expect(selectDomainChapter).toHaveBeenCalledWith('beta', 'b1');
+    expect(screen.getByTestId('location')).toHaveTextContent('/sessions/beta-b1-session');
+    expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 
   it('exposes rename and delete actions from the domain kebab menu', async () => {
     renderSidebar();
 
-    await screen.findByRole('button', { name: 'alpha' });
+    await screen.findByRole('link', { name: 'alpha' });
     await userEvent.click(screen.getByRole('button', { name: 'Domain actions for alpha' }));
 
     expect(screen.getByRole('menuitem', { name: 'Rename domain' })).toBeInTheDocument();
@@ -154,7 +195,7 @@ describe('Sidebar domain menu', () => {
     });
     renderSidebar();
 
-    await screen.findByRole('button', { name: 'alpha' });
+    await screen.findByRole('link', { name: 'alpha' });
     await userEvent.click(screen.getByRole('button', { name: 'Domain actions for alpha' }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Rename domain' }));
 
@@ -175,7 +216,7 @@ describe('Sidebar domain menu', () => {
     renameDomain.mockRejectedValue(new Error('A domain with this name already exists.'));
     renderSidebar();
 
-    await screen.findByRole('button', { name: 'alpha' });
+    await screen.findByRole('link', { name: 'alpha' });
     await userEvent.click(screen.getByRole('button', { name: 'Domain actions for alpha' }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Rename domain' }));
 
@@ -192,7 +233,7 @@ describe('Sidebar domain menu', () => {
   it('warns about cascading deletion and can cancel', async () => {
     renderSidebar();
 
-    await screen.findByRole('button', { name: 'alpha' });
+    await screen.findByRole('link', { name: 'alpha' });
     await userEvent.click(screen.getByRole('button', { name: 'Domain actions for alpha' }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete domain' }));
 
@@ -214,7 +255,7 @@ describe('Sidebar domain menu', () => {
     });
     renderSidebar();
 
-    await screen.findByRole('button', { name: 'beta' });
+    await screen.findByRole('link', { name: 'beta' });
     await userEvent.click(screen.getByRole('button', { name: 'Domain actions for beta' }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete domain' }));
     await userEvent.click(screen.getByRole('button', { name: 'Delete domain' }));

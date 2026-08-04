@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { StrictMode } from 'react';
+import { forwardRef, StrictMode } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -25,6 +25,7 @@ const listSessions = vi.fn();
 const endSession = vi.fn();
 const resumeSession = vi.fn();
 const setStoredKnowledgeSource = vi.fn();
+const putScratchpadScene = vi.fn().mockResolvedValue({});
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
@@ -42,8 +43,15 @@ vi.mock('../api/client', async () => {
     endSession: (...args: unknown[]) => endSession(...args),
     resumeSession: (...args: unknown[]) => resumeSession(...args),
     setStoredKnowledgeSource: (...args: unknown[]) => setStoredKnowledgeSource(...args),
+    putScratchpadScene: (...args: unknown[]) => putScratchpadScene(...args),
   };
 });
+
+vi.mock('../components/scratchpad/ScratchpadCanvas', () => ({
+  ScratchpadCanvas: forwardRef(function CanvasStub() {
+    return <div role="application" aria-label="Scratchpad canvas" />;
+  }),
+}));
 
 import { ActiveDomainProvider } from '../shell/ActiveDomainContext';
 import { AppShell } from '../shell/AppShell';
@@ -366,6 +374,7 @@ describe('Study concept selection', () => {
     expect(createSession).toHaveBeenCalledWith({
       knowledge_source: 'domain:discrete-math/01-set-theory',
       focus_mode: 'adaptive',
+      study_mode: 'chat',
       max_questions: 10,
       concept_ids: ['what_is_a_set'],
     });
@@ -779,5 +788,280 @@ describe('Study resume attach', () => {
       ).toBeGreaterThan(0);
     });
     expect(screen.getAllByText('Chat Mode').length).toBeGreaterThan(0);
+  });
+});
+
+describe('Study scratchpad mode', () => {
+  it('creates a scratchpad session when Scratchpad Mode is selected', async () => {
+    createSession.mockResolvedValue(
+      sessionResponse(['what_is_a_set'], { study_mode: 'scratchpad' }),
+    );
+    renderStudy();
+    await waitFor(() => expect(screen.getByText('Scratchpad Mode')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /Scratchpad Mode/i }));
+    await waitFor(() => expect(screen.getByText('Concepts')).toBeInTheDocument());
+    expect(screen.getByText(/Scratchpad Mode Study Session/i)).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByLabelText(/What is a Set/i)).toBeChecked());
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ study_mode: 'scratchpad' }),
+      );
+      expect(screen.getAllByRole('button', { name: /^Pen$/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /^Session$/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /Exit session/i }).length).toBeGreaterThan(0);
+      expect(
+        screen.getAllByRole('button', { name: /Q1\/10 · What is a Set/i }).length,
+      ).toBeGreaterThan(0);
+    });
+  });
+
+  it('restores scratchpad mode and scene on resume', async () => {
+    resumeSession.mockResolvedValue(
+      resumeResponse({
+        study_mode: 'scratchpad',
+        dialogue_messages: [{ role: 'assistant', content: 'Define a set.' }],
+        tutor_mode: false,
+        scratchpad_scene: {
+          question_number: 1,
+          schema_version: 1,
+          engine: 'apore-konva',
+          nodes: [
+            {
+              id: 'el1',
+              type: 'rectangle',
+              x: 1,
+              y: 2,
+              width: 3,
+              height: 4,
+              stroke: '#26251e',
+              stroke_width: 2,
+            },
+          ],
+          camera: { x: 0, y: 0, scale: 1 },
+          last_export_bounds: null,
+          feedback_regions: [],
+        },
+      }),
+    );
+    localStorage.setItem('apore.knowledge_source', 'domain:discrete-math/01-set-theory');
+
+    renderStudy('/study?session=sess-resume-1');
+
+    await waitFor(() => {
+      expect(resumeSession).toHaveBeenCalledWith('sess-resume-1');
+      expect(screen.getAllByRole('button', { name: /^Pen$/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /^Session$/i }).length).toBeGreaterThan(0);
+    });
+    await userEvent.hover(
+      screen.getAllByRole('button', { name: /Q1\/10 · What is a Set/i })[0],
+    );
+    expect(screen.getByLabelText('Current question')).toHaveTextContent('Define a set.');
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it('toggles the session meta drawer from the immersive toolbar', async () => {
+    createSession.mockResolvedValue(
+      sessionResponse(['what_is_a_set'], { study_mode: 'scratchpad' }),
+    );
+    renderStudy();
+    await waitFor(() => expect(screen.getByText('Scratchpad Mode')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /Scratchpad Mode/i }));
+    await waitFor(() => expect(screen.getByLabelText(/What is a Set/i)).toBeChecked());
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /^Session$/i }).length).toBeGreaterThan(0);
+    });
+
+    const tab = screen.getAllByRole('button', { name: /^Session$/i })[0];
+    const wasExpanded = tab.getAttribute('aria-expanded') === 'true';
+    await userEvent.click(tab);
+    expect(tab.getAttribute('aria-expanded') === 'true').toBe(!wasExpanded);
+    expect(screen.getAllByRole('button', { name: /^Pen$/i }).length).toBeGreaterThan(0);
+    await userEvent.click(tab);
+    expect(tab.getAttribute('aria-expanded') === 'true').toBe(wasExpanded);
+  });
+
+  it('keeps Exit session inside the scratchpad toolbar (not a empty global band)', async () => {
+    createSession.mockResolvedValue(
+      sessionResponse(['what_is_a_set'], { study_mode: 'scratchpad' }),
+    );
+    renderStudy();
+    await waitFor(() => expect(screen.getByText('Scratchpad Mode')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /Scratchpad Mode/i }));
+    await waitFor(() => expect(screen.getByLabelText(/What is a Set/i)).toBeChecked());
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Exit session/i }).length).toBeGreaterThan(0);
+    });
+    const exit = screen.getAllByRole('button', { name: /Exit session/i })[0];
+    expect(exit.closest('.scratchpad-toolbar')).toBeTruthy();
+    expect(document.querySelector('.topbar--focused')).toBeNull();
+  });
+
+  it('keeps the scratchpad workspace mounted while the next question loads', async () => {
+    resumeSession.mockResolvedValue(
+      resumeResponse({
+        study_mode: 'scratchpad',
+        phase: 'reflection',
+        tutor_mode: false,
+        correct: 'no',
+        explicit_rating: 'ok',
+        dialogue_messages: [
+          { role: 'assistant', content: 'Define a set.' },
+          { role: 'user', content: '[Scratchpad selection]' },
+          { role: 'assistant', content: 'Not quite.' },
+        ],
+      }),
+    );
+    let resolveQuestion!: (value: QuestionResponse) => void;
+    fetchQuestion.mockImplementationOnce(
+      () =>
+        new Promise<QuestionResponse>((resolve) => {
+          resolveQuestion = resolve;
+        }),
+    );
+    getSessionState.mockResolvedValue({
+      session_id: 'sess-resume-1',
+      title: 'Resumed Session',
+      scalar: 0.55,
+      question_count: 1,
+      mastery: {},
+      mastery_delta: {},
+      knowledge_source: 'domain:discrete-math/01-set-theory',
+      focus_mode: 'adaptive',
+      study_mode: 'scratchpad',
+      max_questions: 10,
+      questions_remaining: 9,
+      active_concept_id: 'what_is_a_set',
+      concept_ids: ['what_is_a_set', 'set_operations'],
+      title_pending: false,
+    });
+    postTurn.mockResolvedValue({
+      phase: 'completed',
+      question_number: 1,
+      tutor_message: null,
+      question_closed: true,
+      mode: 'assess',
+      correct: 'no',
+      hint_count: 0,
+      turn_count: 1,
+      hedging_count: 0,
+      inconsistency_flag: false,
+      explicit_rating: 'ok',
+      new_difficulty: 0.55,
+      history: [
+        {
+          question_number: 1,
+          question_text: 'Define a set.',
+          explicit_rating: 'ok',
+          correct: 'no',
+          reward: -0.05,
+        },
+      ],
+    });
+    localStorage.setItem('apore.knowledge_source', 'domain:discrete-math/01-set-theory');
+
+    renderStudy('/study?session=sess-resume-1');
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole('button', { name: /Continue to next question/i }).length,
+      ).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /^Pen$/i }).length).toBeGreaterThan(0);
+    });
+
+    await userEvent.click(
+      screen.getAllByRole('button', { name: /Continue to next question/i })[0],
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Generating next question/i)).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /^Pen$/i }).length).toBeGreaterThan(0);
+    });
+
+    resolveQuestion({
+      ...questionResponse(),
+      question_number: 2,
+      question_id: 'what_is_a_set-recall-02',
+      question_text: 'Give an example of a set.',
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Generating next question/i)).not.toBeInTheDocument();
+      expect(
+        screen.getAllByRole('button', { name: /Q2\/10 · What is a Set/i }).length,
+      ).toBeGreaterThan(0);
+    });
+    await userEvent.hover(
+      screen.getAllByRole('button', { name: /Q2\/10 · What is a Set/i })[0],
+    );
+    expect(screen.getByLabelText('Current question')).toHaveTextContent(
+      'Give an example of a set.',
+    );
+  });
+
+  it('completes Skip → Why skip? → rating through skip_reason', async () => {
+    createSession.mockResolvedValue(
+      sessionResponse(['what_is_a_set'], { study_mode: 'scratchpad' }),
+    );
+    postTurn
+      .mockResolvedValueOnce({
+        phase: 'skip_prompt',
+        question_number: 1,
+        tutor_message: 'Before we move on — briefly, why do you want to skip this question?',
+        question_closed: false,
+        mode: 'assess',
+      })
+      .mockResolvedValueOnce({
+        phase: 'graded',
+        question_number: 1,
+        tutor_message: "Understood — we'll move on from this question.",
+        question_closed: true,
+        mode: 'assess',
+        correct: 'no',
+        hint_count: 0,
+        turn_count: 0,
+        hedging_count: 0,
+        inconsistency_flag: false,
+        assisted: false,
+      });
+
+    renderStudy();
+    await waitFor(() => expect(screen.getByText('Scratchpad Mode')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /Scratchpad Mode/i }));
+    await waitFor(() => expect(screen.getByLabelText(/What is a Set/i)).toBeChecked());
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Skip question/i }).length).toBeGreaterThan(0);
+    });
+    await userEvent.click(screen.getAllByRole('button', { name: /Skip question/i })[0]);
+
+    await waitFor(() => {
+      expect(postTurn).toHaveBeenCalledWith('sess-1', { skip: true });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Why skip?')).toBeInTheDocument();
+    });
+
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /Skip reason/i }),
+      'Already covered this',
+    );
+    await userEvent.click(screen.getByRole('button', { name: /^Continue$/i }));
+
+    await waitFor(() => {
+      expect(postTurn).toHaveBeenCalledWith('sess-1', {
+        skip_reason: 'Already covered this',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('How difficult was that?')).toBeInTheDocument();
+    });
   });
 });

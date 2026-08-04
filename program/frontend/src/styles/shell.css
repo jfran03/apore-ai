@@ -27,6 +27,11 @@
   padding-top: 0;
 }
 
+.shell--scratchpad-focused .shell__content {
+  padding-top: 0;
+  overflow: hidden;
+}
+
 /* Top bar — transparent overlay; only the islands inside catch pointer events */
 .topbar {
   position: absolute;

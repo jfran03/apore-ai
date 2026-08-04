@@ -370,3 +370,75 @@ def test_validate_rejects_unknown_concept():
     )
     errors = validate_question_bank(bank, graph)
     assert any("unknown concept" in e for e in errors)
+
+
+def test_scratchpad_selects_only_eligible_questions():
+    chapter = _chapter()
+    bank = load_question_bank(chapter)
+    assert bank is not None
+    graph = load_concept_graph(chapter)
+    assert any(q.scratchpad_eligible for q in bank.questions)
+    assert any(not q.scratchpad_eligible for q in bank.questions)
+
+    asked: set[str] = set()
+    last: str | None = None
+    for n in range(1, 8):
+        picked = select_question(
+            bank=bank,
+            graph=graph,
+            concept_id=None,
+            scalar=0.5,
+            asked_ids=asked,
+            question_number=n,
+            last_concept_id=last,
+            study_mode="scratchpad",
+        )
+        assert picked.scratchpad_eligible is True
+        asked.add(picked.id)
+        last = picked.concept_id
+
+
+def test_scratchpad_exhausted_when_no_eligible_questions():
+    chapter = _chapter()
+    graph = load_concept_graph(chapter)
+    bank = QuestionBank(
+        version=1,
+        questions=[
+            BankQuestion(
+                id="conceptual-only-01",
+                concept_id="sets_definition",
+                type="recall",
+                intended_difficulty=0.25,
+                text="Explain what a set is.",
+                scratchpad_eligible=False,
+            )
+        ],
+    )
+    with pytest.raises(QuestionBankExhaustedError, match="scratchpad-eligible"):
+        select_question(
+            bank=bank,
+            graph=graph,
+            concept_id=None,
+            scalar=0.5,
+            asked_ids=set(),
+            question_number=1,
+            study_mode="scratchpad",
+        )
+
+
+def test_chat_mode_can_select_ineligible_questions():
+    chapter = _chapter()
+    bank = load_question_bank(chapter)
+    assert bank is not None
+    graph = load_concept_graph(chapter)
+    picked = select_question(
+        bank=bank,
+        graph=graph,
+        concept_id="sets_definition",
+        scalar=0.2,
+        asked_ids=set(),
+        question_number=4,
+        study_mode="chat",
+    )
+    assert picked.type == "recall"
+    assert picked.scratchpad_eligible is False

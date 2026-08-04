@@ -14,6 +14,7 @@ from apore.runtime.core import (
     QuestionResult,
     finalize_turn,
     generate_question,
+    parse_feedback_regions,
     parse_grade_answer_response,
     run_question_cycle,
     _parse_question_block,
@@ -36,40 +37,77 @@ def test_parse_question_block_direct():
     assert "Explain X" in text
 
 
+def test_parse_feedback_regions_clamps_and_limits():
+    regions = parse_feedback_regions(
+        [
+            {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2, "label": "A"},
+            {"x": 0.9, "y": 0.9, "w": 0.2, "h": 0.2},  # overflows
+            {"x": 0.0, "y": 0.0, "w": 0.1, "h": 0.1, "label": "B"},
+            {"x": 0.2, "y": 0.2, "w": 0.1, "h": 0.1, "label": "C"},
+            {"x": 0.3, "y": 0.3, "w": 0.1, "h": 0.1, "label": "D"},
+        ]
+    )
+    assert len(regions) == 3
+    assert regions[0].label == "A"
+    assert regions[1].label == "B"
+
+
 def test_parse_grade_answer_correct():
-    text, correct, help_request = parse_grade_answer_response(
+    text, correct, help_request, regions = parse_grade_answer_response(
         'Correct. Sets have no duplicates.\n{"question_closed": true, "correct": "yes"}'
     )
     assert correct is True
     assert help_request is False
     assert text.startswith("Correct.")
+    assert regions == []
+    assert "question_closed" not in text
+
+
+def test_parse_grade_answer_ignores_empty_set_braces():
+    """Empty-set notation `{}` must not prevent stripping the protocol trailer."""
+    raw = (
+        'Correct. The empty set is written ∅ or {}.\n\n'
+        '```json\n'
+        '{"question_closed": true, "correct": "yes", "feedback_regions": []}\n'
+        '```'
+    )
+    text, correct, help_request, regions = parse_grade_answer_response(raw)
+    assert correct is True
+    assert help_request is False
+    assert "empty set" in text.lower()
+    assert "question_closed" not in text
+    assert "```" not in text
+    assert regions == []
 
 
 def test_parse_grade_answer_incorrect():
-    text, correct, help_request = parse_grade_answer_response(
+    text, correct, help_request, regions = parse_grade_answer_response(
         'Not quite. Order does not matter.\n{"question_closed": true, "correct": "no"}'
     )
     assert correct is False
     assert help_request is False
     assert text.startswith("Not quite.")
+    assert regions == []
 
 
 def test_parse_grade_answer_help_request():
-    text, correct, help_request = parse_grade_answer_response(
+    text, correct, help_request, regions = parse_grade_answer_response(
         'Help request.\n{"help_request": true}'
     )
     assert help_request is True
     assert correct is False
     assert "Help request" not in text
+    assert regions == []
 
 
 def test_parse_grade_answer_no_verdict_is_help():
-    text, correct, help_request = parse_grade_answer_response(
+    text, correct, help_request, regions = parse_grade_answer_response(
         "Let's think about what a set is first. [Source: sets_definition — Definition]"
     )
     assert help_request is True
     assert correct is False
     assert "set" in text.lower()
+    assert regions == []
 
 
 def test_finalize_turn_writes_assisted_flag(tmp_path: Path):

@@ -6,245 +6,280 @@
       "concept_id": "set_operations",
       "type": "recall",
       "intended_difficulty": 0.1,
-      "text": "What is the basic definition of set operations in mathematics?"
+      "text": "What is the basic definition of set operations in mathematics?",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_operations-recall-02",
       "concept_id": "set_operations",
       "type": "recall",
       "intended_difficulty": 0.3,
-      "text": "Describe the different types of set operations, including union, intersection, and difference."
+      "text": "Describe the different types of set operations, including union, intersection, and difference.",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_operations-apply-01",
       "concept_id": "set_operations",
       "type": "apply",
       "intended_difficulty": 0.4,
-      "text": "Given two sets A and B, how would you find their union using set operations?"
+      "text": "Given two sets A and B, how would you find their union using set operations?",
+      "scratchpad_eligible": true
     },
     {
       "id": "set_operations-apply-02",
       "concept_id": "set_operations",
       "type": "apply",
       "intended_difficulty": 0.6,
-      "text": "Suppose you have sets A, B, and C, and you want to find the intersection of A and B, then the union of the result with C. Describe the steps involved in this set operation."
+      "text": "Suppose you have sets A, B, and C, and you want to find the intersection of A and B, then the union of the result with C. Describe the steps involved in this set operation.",
+      "scratchpad_eligible": true
     },
     {
       "id": "set_operations-synthesis-01",
       "concept_id": "set_operations",
       "type": "synthesis",
       "intended_difficulty": 0.7,
-      "text": "Explain how set operations can be used to solve real-world problems, such as finding the common elements between different groups or categories."
+      "text": "Explain how set operations can be used to solve real-world problems, such as finding the common elements between different groups or categories.",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_operations-synthesis-02",
       "concept_id": "set_operations",
       "type": "synthesis",
       "intended_difficulty": 0.85,
-      "text": "Design a scenario where set operations are essential for analyzing and interpreting data from different sources, and describe how these operations facilitate the extraction of meaningful insights."
+      "text": "Design a scenario where set operations are essential for analyzing and interpreting data from different sources, and describe how these operations facilitate the extraction of meaningful insights.",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_partitions-recall-01",
       "concept_id": "set_partitions",
       "type": "recall",
       "intended_difficulty": 0.1,
-      "text": "What is a set partition, and how does it relate to the elements of the original set?"
+      "text": "What is a set partition, and how does it relate to the elements of the original set?",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_partitions-recall-02",
       "concept_id": "set_partitions",
       "type": "recall",
       "intended_difficulty": 0.25,
-      "text": "How do set partitions differ from other types of set operations, such as unions or intersections?"
+      "text": "How do set partitions differ from other types of set operations, such as unions or intersections?",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_partitions-apply-01",
       "concept_id": "set_partitions",
       "type": "apply",
       "intended_difficulty": 0.36,
-      "text": "Given a set of integers, describe how you would partition it into subsets based on their parity."
+      "text": "Given a set of integers, describe how you would partition it into subsets based on their parity.",
+      "scratchpad_eligible": true
     },
     {
       "id": "set_partitions-apply-02",
       "concept_id": "set_partitions",
       "type": "apply",
       "intended_difficulty": 0.55,
-      "text": "Suppose you have a set of students, and you want to partition them into groups based on their favorite hobbies. How would you approach this task?"
+      "text": "Suppose you have a set of students, and you want to partition them into groups based on their favorite hobbies. How would you approach this task?",
+      "scratchpad_eligible": true
     },
     {
       "id": "set_partitions-synthesis-01",
       "concept_id": "set_partitions",
       "type": "synthesis",
       "intended_difficulty": 0.66,
-      "text": "Consider a set of sets, where each inner set represents a partition of a larger set. How might you visualize or represent the relationships between these partitions?"
+      "text": "Consider a set of sets, where each inner set represents a partition of a larger set. How might you visualize or represent the relationships between these partitions?",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_partitions-synthesis-02",
       "concept_id": "set_partitions",
       "type": "synthesis",
       "intended_difficulty": 0.85,
-      "text": "Design an algorithm to generate all possible partitions of a given set, and discuss the trade-offs between different approaches to this problem."
+      "text": "Design an algorithm to generate all possible partitions of a given set, and discuss the trade-offs between different approaches to this problem.",
+      "scratchpad_eligible": false
     },
     {
       "id": "special_sets-recall-01",
       "concept_id": "special_sets",
       "type": "recall",
       "intended_difficulty": 0.1,
-      "text": "What is the definition of a special set in mathematics?"
+      "text": "What is the definition of a special set in mathematics?",
+      "scratchpad_eligible": false
     },
     {
       "id": "special_sets-recall-02",
       "concept_id": "special_sets",
       "type": "recall",
       "intended_difficulty": 0.25,
-      "text": "Can you list the different types of special sets that are commonly used in set theory?"
+      "text": "Can you list the different types of special sets that are commonly used in set theory?",
+      "scratchpad_eligible": false
     },
     {
       "id": "special_sets-apply-01",
       "concept_id": "special_sets",
       "type": "apply",
       "intended_difficulty": 0.36,
-      "text": "How would you use special sets to solve a problem involving set partitions?"
+      "text": "How would you use special sets to solve a problem involving set partitions?",
+      "scratchpad_eligible": false
     },
     {
       "id": "special_sets-apply-02",
       "concept_id": "special_sets",
       "type": "apply",
       "intended_difficulty": 0.55,
-      "text": "Given a specific set, can you apply the concept of special sets to determine its properties and relationships to other sets?"
+      "text": "Given a specific set, can you apply the concept of special sets to determine its properties and relationships to other sets?",
+      "scratchpad_eligible": false
     },
     {
       "id": "special_sets-synthesis-01",
       "concept_id": "special_sets",
       "type": "synthesis",
       "intended_difficulty": 0.66,
-      "text": "How do special sets relate to Venn diagrams, and what insights can be gained from this relationship?"
+      "text": "How do special sets relate to Venn diagrams, and what insights can be gained from this relationship?",
+      "scratchpad_eligible": false
     },
     {
       "id": "special_sets-synthesis-02",
       "concept_id": "special_sets",
       "type": "synthesis",
       "intended_difficulty": 0.85,
-      "text": "Can you propose a new application of special sets in a real-world problem, and explain how it would work?"
+      "text": "Can you propose a new application of special sets in a real-world problem, and explain how it would work?",
+      "scratchpad_eligible": false
     },
     {
       "id": "venn_diagrams-recall-01",
       "concept_id": "venn_diagrams",
       "type": "recall",
       "intended_difficulty": 0.1,
-      "text": "What is the primary purpose of using Venn diagrams in set theory?"
+      "text": "What is the primary purpose of using Venn diagrams in set theory?",
+      "scratchpad_eligible": false
     },
     {
       "id": "venn_diagrams-recall-02",
       "concept_id": "venn_diagrams",
       "type": "recall",
       "intended_difficulty": 0.25,
-      "text": "How do Venn diagrams visually represent the intersection of two sets?"
+      "text": "How do Venn diagrams visually represent the intersection of two sets?",
+      "scratchpad_eligible": false
     },
     {
       "id": "venn_diagrams-apply-01",
       "concept_id": "venn_diagrams",
       "type": "apply",
       "intended_difficulty": 0.36,
-      "text": "Suppose we have two sets, A and B, with some elements in common. How would you use a Venn diagram to illustrate their relationship?"
+      "text": "Suppose we have two sets, A and B, with some elements in common. How would you use a Venn diagram to illustrate their relationship?",
+      "scratchpad_eligible": true
     },
     {
       "id": "venn_diagrams-apply-02",
       "concept_id": "venn_diagrams",
       "type": "apply",
       "intended_difficulty": 0.55,
-      "text": "Given a Venn diagram showing the intersection and union of sets A and B, how can you determine the number of elements unique to set A?"
+      "text": "Given a Venn diagram showing the intersection and union of sets A and B, how can you determine the number of elements unique to set A?",
+      "scratchpad_eligible": true
     },
     {
       "id": "venn_diagrams-synthesis-01",
       "concept_id": "venn_diagrams",
       "type": "synthesis",
       "intended_difficulty": 0.7,
-      "text": "Describe a scenario where using a Venn diagram would be particularly useful for understanding the relationships between three sets, and explain how you would construct such a diagram."
+      "text": "Describe a scenario where using a Venn diagram would be particularly useful for understanding the relationships between three sets, and explain how you would construct such a diagram.",
+      "scratchpad_eligible": false
     },
     {
       "id": "venn_diagrams-synthesis-02",
       "concept_id": "venn_diagrams",
       "type": "synthesis",
       "intended_difficulty": 0.85,
-      "text": "How might the principles behind Venn diagrams be extended or adapted to represent more complex set relationships, such as those involving four or more sets?"
+      "text": "How might the principles behind Venn diagrams be extended or adapted to represent more complex set relationships, such as those involving four or more sets?",
+      "scratchpad_eligible": false
     },
     {
       "id": "ways_to_describe_sets-recall-01",
       "concept_id": "ways_to_describe_sets",
       "type": "recall",
       "intended_difficulty": 0.1,
-      "text": "What are the basic methods used to describe sets in mathematics?"
+      "text": "What are the basic methods used to describe sets in mathematics?",
+      "scratchpad_eligible": false
     },
     {
       "id": "ways_to_describe_sets-recall-02",
       "concept_id": "ways_to_describe_sets",
       "type": "recall",
       "intended_difficulty": 0.25,
-      "text": "How do set descriptions using roster notation differ from those using set-builder notation?"
+      "text": "How do set descriptions using roster notation differ from those using set-builder notation?",
+      "scratchpad_eligible": false
     },
     {
       "id": "ways_to_describe_sets-apply-01",
       "concept_id": "ways_to_describe_sets",
       "type": "apply",
       "intended_difficulty": 0.36,
-      "text": "Given a set of numbers {1, 2, 3, 4}, describe it using both roster and set-builder notation."
+      "text": "Given a set of numbers {1, 2, 3, 4}, describe it using both roster and set-builder notation.",
+      "scratchpad_eligible": true
     },
     {
       "id": "ways_to_describe_sets-apply-02",
       "concept_id": "ways_to_describe_sets",
       "type": "apply",
       "intended_difficulty": 0.55,
-      "text": "Apply the concept of set description to define the set of all even numbers between 1 and 10."
+      "text": "Apply the concept of set description to define the set of all even numbers between 1 and 10.",
+      "scratchpad_eligible": true
     },
     {
       "id": "ways_to_describe_sets-synthesis-01",
       "concept_id": "ways_to_describe_sets",
       "type": "synthesis",
       "intended_difficulty": 0.66,
-      "text": "Compare and contrast the use of Venn diagrams with set descriptions in understanding set relationships."
+      "text": "Compare and contrast the use of Venn diagrams with set descriptions in understanding set relationships.",
+      "scratchpad_eligible": false
     },
     {
       "id": "ways_to_describe_sets-synthesis-02",
       "concept_id": "ways_to_describe_sets",
       "type": "synthesis",
       "intended_difficulty": 0.85,
-      "text": "Synthesize your understanding of set descriptions and Venn diagrams to explain how they complement each other in set theory."
+      "text": "Synthesize your understanding of set descriptions and Venn diagrams to explain how they complement each other in set theory.",
+      "scratchpad_eligible": false
     },
     {
       "id": "what_is_a_set-recall-02",
       "concept_id": "what_is_a_set",
       "type": "recall",
       "intended_difficulty": 0.25,
-      "text": "How do sets differ from other mathematical collections, such as lists or tuples?"
+      "text": "How do sets differ from other mathematical collections, such as lists or tuples?",
+      "scratchpad_eligible": false
     },
     {
       "id": "what_is_a_set-apply-01",
       "concept_id": "what_is_a_set",
       "type": "apply",
       "intended_difficulty": 0.36,
-      "text": "Given a set of numbers, how would you determine if a specific number is an element of that set?"
+      "text": "Given a set of numbers, how would you determine if a specific number is an element of that set?",
+      "scratchpad_eligible": true
     },
     {
       "id": "what_is_a_set-apply-02",
       "concept_id": "what_is_a_set",
       "type": "apply",
       "intended_difficulty": 0.55,
-      "text": "Describe how you would use set operations to find the intersection of two sets of numbers."
+      "text": "Describe how you would use set operations to find the intersection of two sets of numbers.",
+      "scratchpad_eligible": false
     },
     {
       "id": "what_is_a_set-synthesis-01",
       "concept_id": "what_is_a_set",
       "type": "synthesis",
       "intended_difficulty": 0.66,
-      "text": "Explain how the concept of a set is used in real-world applications, such as data analysis or computer science."
+      "text": "Explain how the concept of a set is used in real-world applications, such as data analysis or computer science.",
+      "scratchpad_eligible": false
     },
     {
       "id": "what_is_a_set-synthesis-02",
       "concept_id": "what_is_a_set",
       "type": "synthesis",
       "intended_difficulty": 0.85,
-      "text": "Discuss the implications of set theory on our understanding of mathematical structures and relationships."
+      "text": "Discuss the implications of set theory on our understanding of mathematical structures and relationships.",
+      "scratchpad_eligible": false
     }
   ]
 }

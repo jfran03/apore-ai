@@ -30,7 +30,7 @@ vi.mock('./ActiveDomainContext', async () => {
 });
 
 vi.mock('./StudyFocusContext', () => ({
-  useStudyFocus: () => ({ focused: false, onExitRequest: null }),
+  useStudyFocus: () => ({ focused: false, focusMode: null, onExitRequest: null }),
 }));
 
 vi.mock('../assets/logo-no-bg.png', () => ({ default: 'logo-mock.png' }));

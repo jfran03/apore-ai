@@ -4,6 +4,7 @@ import anthropic
 
 from apore.config.llm import get_anthropic_api_key
 from apore.providers.base import Provider
+from apore.providers.multimodal import MultimodalError, normalize_messages_for_anthropic
 
 DEFAULT_MODEL = "claude-sonnet-4-5"
 
@@ -27,10 +28,14 @@ class AnthropicProvider(Provider):
         model: str,
         config: dict,
     ) -> str:
+        try:
+            converted = normalize_messages_for_anthropic(messages)
+        except MultimodalError as exc:
+            raise ValueError(str(exc)) from exc
         response = self._client.messages.create(
             model=model,
             max_tokens=config.get("max_tokens", 1024),
             system=system_prompt,
-            messages=messages,
+            messages=converted,
         )
         return response.content[0].text

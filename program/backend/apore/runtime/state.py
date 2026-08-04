@@ -44,6 +44,7 @@ def _session_template(
     focus_mode: str,
     max_questions: int,
     concept_ids: list[str] | None = None,
+    study_mode: str = "chat",
     status: str = "active",
     ended_at: str = "",
 ) -> str:
@@ -55,6 +56,7 @@ def _session_template(
         f"created_at: {created_at}\n"
         f"knowledge_source: {knowledge_source}\n"
         f"focus_mode: {focus_mode}\n"
+        f"study_mode: {study_mode}\n"
         f"max_questions: {max_questions}\n"
         f"concept_ids: {concepts_line}\n"
         f"status: {status}\n"
@@ -106,8 +108,10 @@ def _replace_section(text: str, heading: str, body: str) -> str:
     return f"{trimmed}\n\n## {heading}\n{body}"
 
 
-def format_messages_markdown(messages: list[dict[str, str]]) -> str:
+def format_messages_markdown(messages: list[dict]) -> str:
     """Render dialogue turns as readable markdown prose."""
+    from apore.providers.multimodal import content_display_text
+
     lines: list[str] = []
     for msg in messages:
         role = (msg.get("role") or "").strip()
@@ -117,7 +121,7 @@ def format_messages_markdown(messages: list[dict[str, str]]) -> str:
             label = "Learner"
         else:
             label = role.title() or "Unknown"
-        content = (msg.get("content") or "").strip()
+        content = content_display_text(msg.get("content")).strip()
         if not content:
             continue
         lines.append(f"**{label}:** {content}")
@@ -207,6 +211,7 @@ def initialize(
     focus_mode: str | None = None,
     max_questions: int | None = None,
     concept_ids: list[str] | None = None,
+    study_mode: str = "chat",
 ) -> None:
     """Create a fresh learner-state.md with default values."""
     if session_id and created_at and knowledge_source and focus_mode is not None and max_questions is not None:
@@ -220,6 +225,7 @@ def initialize(
                 focus_mode=focus_mode,
                 max_questions=max_questions,
                 concept_ids=concept_ids,
+                study_mode=study_mode or "chat",
             ),
         )
         return

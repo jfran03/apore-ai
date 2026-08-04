@@ -28,6 +28,8 @@ import type {
   ChapterArtifactStatus,
   CompileStatus,
   WikiPreview,
+  ScratchpadScenePayload,
+  ScratchpadSceneResponse,
 } from './types';
 
 function domainChapterBase(knowledgeSource: string): string {
@@ -109,6 +111,27 @@ export async function postTurn(sessionId: string, req: TurnRequest): Promise<Tur
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
+}
+
+export async function putScratchpadScene(
+  sessionId: string,
+  scene: ScratchpadScenePayload,
+): Promise<ScratchpadSceneResponse> {
+  return apiFetch<ScratchpadSceneResponse>(`/sessions/${sessionId}/scratchpad/scene`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(scene),
+  });
+}
+
+export async function getScratchpadScene(
+  sessionId: string,
+  questionNumber: number,
+): Promise<ScratchpadSceneResponse> {
+  const qs = new URLSearchParams({ question_number: String(questionNumber) });
+  return apiFetch<ScratchpadSceneResponse>(
+    `/sessions/${sessionId}/scratchpad/scene?${qs.toString()}`,
+  );
 }
 
 export async function getSessionState(sessionId: string): Promise<SessionStateResponse> {

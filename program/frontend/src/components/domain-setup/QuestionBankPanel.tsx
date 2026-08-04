@@ -16,6 +16,7 @@ const EMPTY_ENTRY: QuestionBankEntry = {
   type: 'recall',
   intended_difficulty: 0.25,
   text: '',
+  scratchpad_eligible: false,
 };
 
 const POLL_INTERVAL_MS = 1500;
@@ -266,6 +267,7 @@ export function QuestionBankPanel({
       type: q.type,
       intended_difficulty: q.intended_difficulty,
       text: q.text,
+      scratchpad_eligible: q.scratchpad_eligible,
     });
     setShowForm(true);
   };
@@ -426,6 +428,7 @@ export function QuestionBankPanel({
                           <th>Depth</th>
                           <th>Type</th>
                           <th>Difficulty</th>
+                          <th>Scratchpad</th>
                           <th>Question</th>
                           <th aria-label="Actions" />
                         </tr>
@@ -437,6 +440,7 @@ export function QuestionBankPanel({
                             <td>{q.depth ?? '—'}</td>
                             <td>{q.type}</td>
                             <td>{q.intended_difficulty.toFixed(2)}</td>
+                            <td>{q.scratchpad_eligible ? 'Yes' : 'No'}</td>
                             <td className="wb-table__text">{q.text}</td>
                             <td className="wb-table__actions">
                               <button
@@ -537,6 +541,17 @@ export function QuestionBankPanel({
                   setForm({ ...form, intended_difficulty: parseFloat(e.target.value) })
                 }
               />
+            </label>
+            <label className="wb-form__checkbox">
+              <input
+                type="checkbox"
+                checked={form.scratchpad_eligible}
+                disabled={generating}
+                onChange={(e) =>
+                  setForm({ ...form, scratchpad_eligible: e.target.checked })
+                }
+              />
+              Scratchpad eligible
             </label>
             <label className="wb-form__full">
               Question text

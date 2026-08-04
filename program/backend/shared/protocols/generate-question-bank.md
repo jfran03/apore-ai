@@ -29,6 +29,21 @@ Use two distinct values within each band when writing two questions of the same 
 
 ---
 
+## Scratchpad eligibility (`scratchpad_eligible`)
+
+Mark `scratchpad_eligible: true` only when the learner can show the answer as
+visible work on a canvas — computation, symbolic notation, a diagram, mapping,
+table, constructed counterexample, or other drawn/written product.
+
+Mark `scratchpad_eligible: false` for conceptual or explanation-only prompts
+that are best answered in words (definitions, “explain why”, compare/contrast
+without producing a concrete artifact).
+
+Aim for a mix within each concept: at least some apply/synthesis items should
+be scratchpad-eligible when the grounding supports a visible answer.
+
+---
+
 ## Output format
 
 Reply with **ONLY** valid JSON (no markdown fences, no prose):
@@ -41,7 +56,8 @@ Reply with **ONLY** valid JSON (no markdown fences, no prose):
       "concept_id": "<node_id>",
       "type": "recall | apply | synthesis",
       "intended_difficulty": 0.25,
-      "text": "<question text>"
+      "text": "<question text>",
+      "scratchpad_eligible": true
     }
   ]
 }
@@ -50,3 +66,4 @@ Reply with **ONLY** valid JSON (no markdown fences, no prose):
 - `id` must be unique across the entire response.
 - Use suffix `-01`, `-02` for the two questions per type per concept.
 - Include all six questions per concept (2 × 3 types) in one array for that concept call.
+- `scratchpad_eligible` is required on every question.

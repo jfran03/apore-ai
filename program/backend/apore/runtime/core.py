@@ -60,9 +60,20 @@ class GeneratedQuestion:
 
 
 @dataclass
+class FeedbackRegionResult:
+    x: float
+    y: float
+    w: float
+    h: float
+    label: str = ""
+    explanation: str = ""
+
+
+@dataclass
 class TutorTurnResult:
     tutor_message: str
     question_closed: bool
+    feedback_regions: list[FeedbackRegionResult] | None = None
 
 
 @dataclass
@@ -70,6 +81,7 @@ class GradeAnswerTurnResult:
     tutor_message: str
     correct: bool
     help_request: bool = False
+    feedback_regions: list[FeedbackRegionResult] | None = None
 
 
 @dataclass
@@ -120,9 +132,11 @@ class QuestionResult:
 
 
 def _strip_code_fence(text: str) -> str:
+    """Unwrap a message that is entirely wrapped in one markdown code fence."""
     lines = text.strip().splitlines()
-    if lines and lines[0].strip().startswith("```"):
-        lines = lines[1:]
+    if not lines or not lines[0].strip().startswith("```"):
+        return text.strip()
+    lines = lines[1:]
     if lines and lines[-1].strip() == "```":
         lines = lines[:-1]
     return "\n".join(lines).strip()
@@ -193,8 +207,14 @@ def _parse_question_block(raw: str) -> tuple[str, str, float, str]:
     return _parse_question_block_protocol(text)
 
 
-def _find_json_object(text: str) -> str | None:
-    """Return the first balanced {...} substring that parses as JSON."""
+_PROTOCOL_TRAILER_KEYS = frozenset(
+    {"question_closed", "correct", "feedback_regions", "help_request"}
+)
+_EMPTY_CODE_FENCE = re.compile(r"```(?:json)?\s*```", re.IGNORECASE)
+
+
+def _iter_json_objects(text: str):
+    """Yield balanced {...} substrings that parse as JSON, left to right."""
     for start in (i for i, ch in enumerate(text) if ch == "{"):
         depth = 0
         for i in range(start, len(text)):
@@ -208,8 +228,49 @@ def _find_json_object(text: str) -> str | None:
                         json.loads(candidate)
                     except json.JSONDecodeError:
                         break
-                    return candidate
-    return None
+                    yield candidate
+                    break
+
+
+def _find_json_object(text: str) -> str | None:
+    """Return the first balanced {...} substring that parses as JSON."""
+    return next(_iter_json_objects(text), None)
+
+
+def _find_protocol_trailer(text: str) -> str | None:
+    """Return the last JSON object that looks like a tutor/grade protocol trailer.
+
+    Prose often contains empty-set notation `{}` or other braces; matching the
+    first JSON object would leave the real trailer in the learner-visible text.
+    """
+    last: str | None = None
+    for candidate in _iter_json_objects(text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and _PROTOCOL_TRAILER_KEYS.intersection(parsed):
+            last = candidate
+    return last
+
+
+def _strip_json_trailer(text: str, json_obj: str) -> str:
+    """Remove a JSON trailer and any markdown fence that wrapped only that object."""
+    fenced = re.compile(
+        rf"```(?:json)?\s*\n?\s*{re.escape(json_obj)}\s*\n?\s*```",
+        re.IGNORECASE,
+    )
+    stripped = fenced.sub("", text, count=1)
+    if stripped == text:
+        # Opening fence may remain if a prior pass removed only the closer.
+        open_only = re.compile(
+            rf"```(?:json)?\s*\n?\s*{re.escape(json_obj)}",
+            re.IGNORECASE,
+        )
+        stripped = open_only.sub("", text, count=1)
+    if stripped == text:
+        stripped = text.replace(json_obj, "", 1)
+    return _EMPTY_CODE_FENCE.sub("", stripped).strip()
 
 
 def _parse_signals(raw: str) -> dict:
@@ -258,26 +319,76 @@ def seed_dialogue_transcript(question: GeneratedQuestion) -> list[dict[str, str]
     return [{"role": "assistant", "content": question.gen_response}]
 
 
-def parse_tutor_response(raw: str) -> tuple[str, bool]:
+def parse_feedback_regions(raw_regions: object) -> list[FeedbackRegionResult]:
+    """Validate and clamp up to 3 normalized crop-relative regions."""
+    if not isinstance(raw_regions, list):
+        return []
+    out: list[FeedbackRegionResult] = []
+    for item in raw_regions:
+        if len(out) >= 3:
+            break
+        if not isinstance(item, dict):
+            continue
+        try:
+            x = float(item["x"])
+            y = float(item["y"])
+            w = float(item["w"])
+            h = float(item["h"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+            continue
+        if not (0.0 < w <= 1.0 and 0.0 < h <= 1.0):
+            continue
+        if x + w > 1.05 or y + h > 1.05:
+            continue
+        # Soft-clamp overflow from floating error.
+        w = min(w, 1.0 - x)
+        h = min(h, 1.0 - y)
+        if w <= 0 or h <= 0:
+            continue
+        label = str(item.get("label") or "").strip()[:80]
+        explanation = str(item.get("explanation") or "").strip()[:240]
+        out.append(
+            FeedbackRegionResult(
+                x=x,
+                y=y,
+                w=w,
+                h=h,
+                label=label,
+                explanation=explanation,
+            )
+        )
+    return out
+
+
+def parse_tutor_response(
+    raw: str,
+) -> tuple[str, bool, list[FeedbackRegionResult]]:
     """Strip optional JSON trailer and detect question closure."""
     text = _strip_code_fence((raw or "").strip())
     question_closed = bool(_TUTOR_CLOSE_PATTERN.search(text))
+    regions: list[FeedbackRegionResult] = []
 
-    json_obj = _find_json_object(text)
+    json_obj = _find_protocol_trailer(text)
     if json_obj:
         try:
             parsed = json.loads(json_obj)
         except json.JSONDecodeError:
             parsed = None
-        if isinstance(parsed, dict) and parsed.get("question_closed"):
-            question_closed = True
-            text = text.replace(json_obj, "").strip()
+        if isinstance(parsed, dict):
+            if parsed.get("question_closed"):
+                question_closed = True
+            regions = parse_feedback_regions(parsed.get("feedback_regions"))
+            text = _strip_json_trailer(text, json_obj)
 
-    return text.strip(), question_closed
+    return text.strip(), question_closed, regions
 
 
-def parse_grade_answer_response(raw: str) -> tuple[str, bool, bool]:
-    """Strip JSON trailer; return (text, correct, help_request).
+def parse_grade_answer_response(
+    raw: str,
+) -> tuple[str, bool, bool, list[FeedbackRegionResult]]:
+    """Strip JSON trailer; return (text, correct, help_request, regions).
 
     When the model emits neither a graded verdict nor a help marker, treat the
     reply as a help request rather than defaulting to incorrect.
@@ -289,8 +400,9 @@ def parse_grade_answer_response(raw: str) -> tuple[str, bool, bool]:
     correct = has_correct
     help_request = has_help
     trailer_correct: str | None = None
+    regions: list[FeedbackRegionResult] = []
 
-    json_obj = _find_json_object(text)
+    json_obj = _find_protocol_trailer(text)
     if json_obj:
         try:
             parsed = json.loads(json_obj)
@@ -302,43 +414,51 @@ def parse_grade_answer_response(raw: str) -> tuple[str, bool, bool]:
             trailer_correct = parsed.get("correct")
             if trailer_correct in ("yes", "no"):
                 correct = trailer_correct == "yes"
-            text = text.replace(json_obj, "").strip()
+            regions = parse_feedback_regions(parsed.get("feedback_regions"))
+            text = _strip_json_trailer(text, json_obj)
 
     if has_incorrect:
         correct = False
 
     if help_request:
         text = _GRADE_HELP_PATTERN.sub("", text, count=1).strip()
-        return text, False, True
+        return text, False, True, regions
 
     # Safety net: helpful prose without a grade verdict is a help request.
     if not has_correct and not has_incorrect and trailer_correct not in ("yes", "no"):
-        return text.strip(), False, True
+        return text.strip(), False, True, regions
 
-    return text.strip(), correct, False
+    return text.strip(), correct, False, regions
 
 
 def skip_prompt_message() -> str:
     return _SKIP_PROMPT
 
 
+def _normalize_learner_content(learner_message: str | list) -> str | list:
+    if isinstance(learner_message, list):
+        return learner_message
+    return learner_message.strip()
+
+
 def tutor_turn(
     *,
     question: GeneratedQuestion,
-    dialogue_transcript: list[dict[str, str]],
-    learner_message: str,
+    dialogue_transcript: list[dict],
+    learner_message: str | list,
     chapter: ChapterContext,
     state_path: Path,
     provider: Provider,
     model: str,
     config: dict,
     program_root: Path,
+    protocol: str = "tutor-turn",
 ) -> TutorTurnResult:
     """Run one Socratic tutor turn for the learner's latest message."""
     graph = load_concept_graph(chapter)
     wiki_paths = get_wiki_paths(chapter, question.concept_id, graph)
     assembled = assemble_prompt(
-        "tutor-turn",
+        protocol,
         state_path,
         concept_id=question.concept_id,
         chapter=chapter,
@@ -347,34 +467,39 @@ def tutor_turn(
         program_root=program_root,
     )
     messages = list(assembled["messages"]) + list(dialogue_transcript)
-    messages.append({"role": "user", "content": learner_message.strip()})
+    messages.append({"role": "user", "content": _normalize_learner_content(learner_message)})
     raw = provider.invoke(
         assembled["system"],
         messages,
         model,
-        {**config, "protocol": "tutor-turn"},
+        {**config, "protocol": protocol},
     )
-    tutor_message, question_closed = parse_tutor_response(raw)
-    return TutorTurnResult(tutor_message=tutor_message, question_closed=question_closed)
+    tutor_message, question_closed, regions = parse_tutor_response(raw)
+    return TutorTurnResult(
+        tutor_message=tutor_message,
+        question_closed=question_closed,
+        feedback_regions=regions,
+    )
 
 
 def grade_answer_turn(
     *,
     question: GeneratedQuestion,
-    dialogue_transcript: list[dict[str, str]],
-    learner_message: str,
+    dialogue_transcript: list[dict],
+    learner_message: str | list,
     chapter: ChapterContext,
     state_path: Path,
     provider: Provider,
     model: str,
     config: dict,
     program_root: Path,
+    protocol: str = "grade-answer",
 ) -> GradeAnswerTurnResult:
     """Grade a learner answer attempt: verdict first, then explanation; always closes."""
     graph = load_concept_graph(chapter)
     wiki_paths = get_wiki_paths(chapter, question.concept_id, graph)
     assembled = assemble_prompt(
-        "grade-answer",
+        protocol,
         state_path,
         concept_id=question.concept_id,
         chapter=chapter,
@@ -383,32 +508,41 @@ def grade_answer_turn(
         program_root=program_root,
     )
     messages = list(assembled["messages"]) + list(dialogue_transcript)
-    messages.append({"role": "user", "content": learner_message.strip()})
+    messages.append({"role": "user", "content": _normalize_learner_content(learner_message)})
     raw = provider.invoke(
         assembled["system"],
         messages,
         model,
-        {**config, "protocol": "grade-answer"},
+        {**config, "protocol": protocol},
     )
-    tutor_message, correct, help_request = parse_grade_answer_response(raw)
+    tutor_message, correct, help_request, regions = parse_grade_answer_response(raw)
     return GradeAnswerTurnResult(
         tutor_message=tutor_message,
         correct=correct,
         help_request=help_request,
+        feedback_regions=regions,
     )
 
 
 def _build_grade_messages(
     question: GeneratedQuestion,
-    learner_response: str,
-    dialogue_transcript: list[dict[str, str]] | None = None,
-) -> list[dict[str, str]]:
+    learner_response: str | list,
+    dialogue_transcript: list[dict] | None = None,
+) -> list[dict]:
     """Assemble transcript messages for extract-signals (single-shot or multi-turn)."""
+    from apore.providers.multimodal import content_display_text, persistable_content
+
     if dialogue_transcript:
-        return list(dialogue_transcript)
+        # Persistable copy for signal extraction: keep text; collapse images.
+        out: list[dict] = []
+        for m in dialogue_transcript:
+            role = m.get("role")
+            content = m.get("content")
+            out.append({"role": role, "content": persistable_content(content)})
+        return out
     return [
         {"role": "assistant", "content": question.gen_response},
-        {"role": "user", "content": learner_response},
+        {"role": "user", "content": content_display_text(learner_response)},
     ]
 
 
@@ -429,6 +563,7 @@ def generate_question(
     focus_mode: str = "adaptive",
     last_concept_id: str | None = None,
     allowed_concept_ids: set[str] | None = None,
+    study_mode: str = "chat",
 ) -> GeneratedQuestion:
     """Select from question bank when present; otherwise fall back to LLM generation."""
     graph = load_concept_graph(chapter)
@@ -460,6 +595,7 @@ def generate_question(
             focus_mode=focus_mode,
             last_concept_id=last_concept_id,
             allowed_concept_ids=allowed_concept_ids,
+            study_mode=study_mode,
         )
         gen_response = format_question_block(entry, graph)
         concept_label = graph.label_for(entry.concept_id)
@@ -524,14 +660,14 @@ def generate_question(
 def assess_response(
     *,
     question: GeneratedQuestion,
-    learner_response: str,
+    learner_response: str | list,
     chapter: ChapterContext,
     state_path: Path,
     provider: Provider,
     model: str,
     config: dict,
     program_root: Path,
-    dialogue_transcript: list[dict[str, str]] | None = None,
+    dialogue_transcript: list[dict] | None = None,
 ) -> AssessmentResult:
     """LLM-only grading: correctness and implicit counts; no state write."""
     graph = load_concept_graph(chapter)

@@ -14,11 +14,15 @@ import {
 } from '../api/client';
 import type {
   ConceptMasteryDelta,
+  FeedbackRegion,
   MasteryBand,
   QuestionResponse,
   ResumeSessionResponse,
+  ScratchpadScenePayload,
+  StudyMode,
   TurnResponse,
 } from '../api/types';
+import { stripProtocolTrailer } from '../api/protocolText';
 import { parseKnowledgeSource, useActiveDomain } from '../shell/ActiveDomainContext';
 import { useStudyFocus } from '../shell/StudyFocusContext';
 import { QuestionCard } from '../components/QuestionCard';
@@ -34,6 +38,8 @@ import {
   MasteryDeltaList,
   type MasteryDeltaItem,
 } from '../components/MasteryDeltaList';
+import { ScratchpadMetaDrawer } from '../components/scratchpad/ScratchpadMetaDrawer';
+import { ScratchpadWorkspace } from '../components/scratchpad/ScratchpadWorkspace';
 import '../styles/setup.css';
 import '../styles/study.css';
 
@@ -64,6 +70,7 @@ interface SessionState {
   maxQuestions: number;
   scalar: number;
   questionCount: number;
+  studyMode: StudyMode;
   currentQuestion: CurrentQuestion | null;
   history: HistoryRecord[];
   dialogueMessages: DialogueMessage[];
@@ -88,6 +95,9 @@ interface SessionState {
     reward?: number;
   } | null;
   masteryDelta: Record<string, ConceptMasteryDelta>;
+  feedbackRegions: FeedbackRegion[];
+  scratchpadScene: ScratchpadScenePayload | null;
+  clearSceneToken: number;
 }
 
 interface SessionCompleteSummary {
@@ -151,6 +161,7 @@ function buildCurrentQuestion(q: QuestionResponse): CurrentQuestion {
 }
 
 function gradeFromTurn(res: TurnResponse): GradeResult {
+  const feedback = stripProtocolTrailer(res.tutor_message ?? '') || null;
   return {
     question_number: res.question_number,
     correct: res.correct,
@@ -159,6 +170,7 @@ function gradeFromTurn(res: TurnResponse): GradeResult {
     hedging_count: res.hedging_count,
     flag_reason: res.flag_reason,
     assisted: res.assisted === true,
+    feedback,
   };
 }
 
@@ -186,6 +198,15 @@ function sessionFromResume(res: ResumeSessionResponse): SessionState {
   else if (res.phase === 'graded') phase = 'rating';
   else if (res.phase === 'reflection') phase = 'reflection';
 
+  const lastLearner =
+    [...res.dialogue_messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const lastAssistant =
+    [...res.dialogue_messages].reverse().find((m) => m.role === 'assistant')?.content?.trim() ||
+    null;
+  const lastAssistantFeedback = lastAssistant
+    ? stripProtocolTrailer(lastAssistant) || null
+    : null;
+
   const graded: GradeResult | null =
     res.phase === 'graded' || res.phase === 'reflection'
       ? {
@@ -196,11 +217,9 @@ function sessionFromResume(res: ResumeSessionResponse): SessionState {
           hedging_count: res.hedging_count ?? 0,
           flag_reason: res.flag_reason ?? null,
           assisted: res.assisted === true,
+          feedback: lastAssistantFeedback,
         }
       : null;
-
-  const lastLearner =
-    [...res.dialogue_messages].reverse().find((m) => m.role === 'user')?.content ?? '';
 
   const ratingContext =
     phase === 'rating' && currentQuestion
@@ -242,6 +261,7 @@ function sessionFromResume(res: ResumeSessionResponse): SessionState {
     maxQuestions: res.max_questions,
     scalar: res.new_difficulty ?? res.scalar,
     questionCount: res.question_count,
+    studyMode: res.study_mode === 'scratchpad' ? 'scratchpad' : 'chat',
     currentQuestion,
     history,
     dialogueMessages,
@@ -254,6 +274,9 @@ function sessionFromResume(res: ResumeSessionResponse): SessionState {
     ratingContext,
     pendingAdvance,
     masteryDelta: res.mastery_delta ?? {},
+    feedbackRegions: res.scratchpad_scene?.feedback_regions ?? [],
+    scratchpadScene: res.scratchpad_scene ?? null,
+    clearSceneToken: 0,
   };
 }
 
@@ -272,6 +295,7 @@ export function Study() {
   const { setFocused, setOnExitRequest } = useStudyFocus();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('adaptive');
+  const [studyMode, setStudyMode] = useState<StudyMode>('chat');
   const [sessionLength, setSessionLength] = useState(10);
   const [preambleStep, setPreambleStep] = useState<PreambleStep>('mode');
   const [conceptOptions, setConceptOptions] = useState<ConceptOption[]>([]);
@@ -292,6 +316,18 @@ export function Study() {
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [scratchpadMetaOpen, setScratchpadMetaOpen] = useState(() => {
+    try {
+      const stored = sessionStorage.getItem('apore.scratchpad.metaOpen');
+      if (stored === '1') return true;
+      if (stored === '0') return false;
+    } catch {
+      // ignore
+    }
+    return typeof window !== 'undefined'
+      ? window.matchMedia('(min-width: 960px)').matches
+      : false;
+  });
   const pendingAfterReveal = useRef<(() => void) | null>(null);
   const titlePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exitContinueRef = useRef<HTMLButtonElement>(null);
@@ -546,6 +582,8 @@ export function Study() {
           ratingContext: null,
           pendingAdvance: null,
           masteryDelta: state.mastery_delta ?? {},
+          feedbackRegions: [],
+          scratchpadScene: null,
         };
       });
     } catch (err) {
@@ -566,6 +604,7 @@ export function Study() {
       const res = await createSession({
         knowledge_source: selectedChapter.knowledge_source,
         focus_mode: focusMode,
+        study_mode: studyMode,
         max_questions: sessionLength,
         concept_ids: selectedConceptIds,
       });
@@ -579,6 +618,7 @@ export function Study() {
         maxQuestions: res.max_questions,
         scalar: res.scalar,
         questionCount: 0,
+        studyMode: res.study_mode === 'scratchpad' ? 'scratchpad' : studyMode,
         currentQuestion: null,
         history: [],
         dialogueMessages: [],
@@ -591,6 +631,9 @@ export function Study() {
         ratingContext: null,
         pendingAdvance: null,
         masteryDelta: {},
+        feedbackRegions: [],
+        scratchpadScene: null,
+        clearSceneToken: 0,
       });
       if (res.title_pending) {
         startTitlePoll(res.session_id);
@@ -622,6 +665,7 @@ export function Study() {
     selectedChapter,
     canStart,
     focusMode,
+    studyMode,
     sessionLength,
     selectedConceptIds,
     startTitlePoll,
@@ -646,9 +690,21 @@ export function Study() {
   }, [stopTitlePoll, setSearchParams]);
 
   useEffect(() => {
-    setFocused(session != null);
+    if (!session) {
+      setFocused(false);
+      return () => setFocused(false);
+    }
+    setFocused(true, session.studyMode === 'scratchpad' ? 'scratchpad' : 'chat');
     return () => setFocused(false);
   }, [session, setFocused]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('apore.scratchpad.metaOpen', scratchpadMetaOpen ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [scratchpadMetaOpen]);
 
   useEffect(() => {
     const openExitConfirm = () => {
@@ -729,12 +785,13 @@ export function Study() {
 
   const handleTurnResponse = useCallback(
     (res: TurnResponse, lastLearnerMessage: string) => {
+      const regions = res.feedback_regions ?? [];
       if (
         res.phase === 'dialogue' ||
         res.phase === 'skip_prompt' ||
         res.phase === 'reflection'
       ) {
-        const tutorText = res.tutor_message ?? '';
+        const tutorText = stripProtocolTrailer(res.tutor_message ?? '');
         beginTutorReveal(tutorText, () => {
           setSession((prev) => {
             if (!prev) return prev;
@@ -743,6 +800,7 @@ export function Study() {
               phase: res.phase === 'reflection' ? 'reflection' : prev.phase,
               skipPrompt: res.phase === 'skip_prompt',
               tutorMode: res.mode === 'tutor' || prev.tutorMode,
+              feedbackRegions: regions,
             };
           });
         });
@@ -750,7 +808,7 @@ export function Study() {
       }
 
       if (res.phase === 'graded') {
-        const tutorText = res.tutor_message ?? '';
+        const tutorText = stripProtocolTrailer(res.tutor_message ?? '');
         const graded = gradeFromTurn(res);
         const enterRating = () => {
           setSession((prev) => {
@@ -772,6 +830,7 @@ export function Study() {
               currentQuestion: prev.currentQuestion,
               chatStatus: 'idle',
               pendingReveal: null,
+              feedbackRegions: regions,
             };
           });
         };
@@ -823,8 +882,96 @@ export function Study() {
     [session, handleTurnResponse],
   );
 
+  const handleScratchpadAsk = useCallback(
+    async (imageDataUri: string, prompt: string) => {
+      if (!session?.currentQuestion) {
+        throw new Error('No active question');
+      }
+      setSubmitLoading(true);
+      setSubmitError(null);
+      const label = prompt.trim() || '[Scratchpad selection]';
+      const userMsg: DialogueMessage = {
+        id: nextMessageId(),
+        role: 'user',
+        content: label,
+      };
+      setSession((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          dialogueMessages: [...prev.dialogueMessages, userMsg],
+          chatStatus: 'generating',
+        };
+      });
+      try {
+        const res = await postTurn(session.sessionId, {
+          scratchpad_action: 'ask',
+          learner_image: imageDataUri,
+          learner_message: prompt.trim() || undefined,
+        });
+        handleTurnResponse(res, label);
+        return {
+          tutorMessage: stripProtocolTrailer(res.tutor_message ?? ''),
+          feedbackRegions: res.feedback_regions ?? [],
+        };
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Failed to ask about selection';
+        setSubmitError(message);
+        setSession((prev) => {
+          if (!prev) return prev;
+          return { ...prev, chatStatus: 'idle' };
+        });
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setSubmitLoading(false);
+      }
+    },
+    [session, handleTurnResponse],
+  );
+
+  const handleScratchpadSubmit = useCallback(
+    async (imageDataUri: string) => {
+      if (!session?.currentQuestion) return;
+      setSubmitLoading(true);
+      setSubmitError(null);
+      const userMsg: DialogueMessage = {
+        id: nextMessageId(),
+        role: 'user',
+        content: '[Scratchpad selection]',
+      };
+      setSession((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          dialogueMessages: [...prev.dialogueMessages, userMsg],
+          chatStatus: 'generating',
+        };
+      });
+      try {
+        const res = await postTurn(session.sessionId, {
+          scratchpad_action: 'submit',
+          learner_image: imageDataUri,
+        });
+        handleTurnResponse(res, '[Scratchpad selection]');
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Failed to submit selection';
+        setSubmitError(message);
+        setSession((prev) => {
+          if (!prev) return prev;
+          return { ...prev, chatStatus: 'idle' };
+        });
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setSubmitLoading(false);
+      }
+    },
+    [session, handleTurnResponse],
+  );
+
   const handleSkip = useCallback(async () => {
-    if (!session?.currentQuestion) return;
+    if (!session?.currentQuestion || session.skipPrompt) return;
     setSubmitLoading(true);
     setSubmitError(null);
     setSession((prev) => {
@@ -845,6 +992,46 @@ export function Study() {
       setSubmitLoading(false);
     }
   }, [session, handleTurnResponse]);
+
+  const handleSkipReason = useCallback(
+    async (text: string) => {
+      if (!session?.currentQuestion || !session.skipPrompt) return;
+      const reason = text.trim();
+      if (!reason) return;
+
+      setSubmitLoading(true);
+      setSubmitError(null);
+
+      const userMsg: DialogueMessage = {
+        id: nextMessageId(),
+        role: 'user',
+        content: reason,
+      };
+
+      setSession((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          dialogueMessages: [...prev.dialogueMessages, userMsg],
+          chatStatus: 'generating',
+        };
+      });
+
+      try {
+        const res = await postTurn(session.sessionId, { skip_reason: reason });
+        handleTurnResponse(res, reason);
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : 'Failed to submit skip reason');
+        setSession((prev) => {
+          if (!prev) return prev;
+          return { ...prev, chatStatus: 'idle' };
+        });
+      } finally {
+        setSubmitLoading(false);
+      }
+    },
+    [session, handleTurnResponse],
+  );
 
   const finishQuestionAdvance = useCallback(
     async (
@@ -910,7 +1097,11 @@ export function Study() {
           tutorMode: false,
           ratingContext: null,
           pendingAdvance: null,
-          currentQuestion: null,
+          // Keep currentQuestion mounted so ScratchpadWorkspace does not tear down
+          // while the next question loads; clearSceneToken clears the canvas in place.
+          feedbackRegions: [],
+          scratchpadScene: null,
+          clearSceneToken: prev.clearSceneToken + 1,
         };
       });
 
@@ -1037,7 +1228,10 @@ export function Study() {
               <button
                 type="button"
                 className="study-mode-card"
-                onClick={() => setPreambleStep('chat-config')}
+                onClick={() => {
+                  setStudyMode('chat');
+                  setPreambleStep('chat-config');
+                }}
               >
                 <span className="study-mode-card__icon" aria-hidden="true">
                   <svg
@@ -1057,7 +1251,14 @@ export function Study() {
                 <span className="study-mode-card__desc">Apore asks questions, you type answers</span>
               </button>
 
-              <div className="study-mode-card study-mode-card--disabled" aria-disabled="true">
+              <button
+                type="button"
+                className="study-mode-card"
+                onClick={() => {
+                  setStudyMode('scratchpad');
+                  setPreambleStep('chat-config');
+                }}
+              >
                 <span className="study-mode-card__icon" aria-hidden="true">
                   <svg
                     width="28"
@@ -1075,8 +1276,7 @@ export function Study() {
                 </span>
                 <span className="study-mode-card__name">Scratchpad Mode</span>
                 <span className="study-mode-card__desc">Apore asks questions, you write answers</span>
-                <span className="study-mode-card__wip">Coming soon</span>
-              </div>
+              </button>
             </div>
           </div>
         </main>
@@ -1095,7 +1295,9 @@ export function Study() {
           </button>
 
           <header className="study-wizard__head">
-            <h1 className="study-wizard__title">Chat Mode Study Session</h1>
+            <h1 className="study-wizard__title">
+              {studyMode === 'scratchpad' ? 'Scratchpad Mode' : 'Chat Mode'} Study Session
+            </h1>
             <p className="study-wizard__sub">What did you want to study?</p>
           </header>
 
@@ -1287,6 +1489,7 @@ export function Study() {
     maxQuestions,
     scalar,
     questionCount,
+    studyMode: activeStudyMode,
     currentQuestion,
     history,
     dialogueMessages,
@@ -1297,6 +1500,9 @@ export function Study() {
     graded,
     tutorMode,
     masteryDelta,
+    feedbackRegions,
+    scratchpadScene,
+    clearSceneToken,
   } = session;
   const busy = submitLoading || questionLoading || chatStatus !== 'idle';
   const showChat =
@@ -1314,14 +1520,81 @@ export function Study() {
           },
         ]
       : [];
+  const isScratchpad = activeStudyMode === 'scratchpad';
 
   return (
-    <main className="study-page">
-      <header className="study-header">
-        <p className="study-header__progress">
-          {title} · Question {progressNumber} of {maxQuestions}
-        </p>
-      </header>
+    <main className={`study-page${isScratchpad ? ' study-page--scratchpad' : ''}`}>
+      {!isScratchpad && (
+        <header className="study-header">
+          <p className="study-header__progress">
+            {title} · Question {progressNumber} of {maxQuestions}
+          </p>
+        </header>
+      )}
+      {isScratchpad ? (
+        <div className="study-layout study-layout--scratchpad">
+          <div className="study-layout__scratchpad">
+            {questionError && (
+              <p className="study-start__error scratchpad-workspace__toast" role="alert">
+                {questionError}
+              </p>
+            )}
+            {currentQuestion && (
+              <ScratchpadWorkspace
+                sessionId={session.sessionId}
+                questionNumber={currentQuestion.question_number}
+                questionText={currentQuestion.question_text}
+                conceptLabel={currentQuestion.concept_label}
+                maxQuestions={maxQuestions}
+                scalar={scalar}
+                turnCount={graded?.turn_count ?? dialogueMessages.filter((message) => message.role === 'user').length}
+                initialScene={scratchpadScene}
+                chatStatus={chatStatus}
+                pendingReveal={pendingReveal}
+                phase={phase === 'idle' ? 'dialogue' : phase}
+                graded={graded}
+                feedbackRegions={feedbackRegions}
+                disabled={busy}
+                metaOpen={scratchpadMetaOpen}
+                onMetaOpenChange={setScratchpadMetaOpen}
+                onExitSession={() => {
+                  setExitError(null);
+                  setExitConfirmOpen(true);
+                }}
+                onAskSelection={handleScratchpadAsk}
+                onSubmitSelection={handleScratchpadSubmit}
+                onSubmitRating={handleSubmitRating}
+                onContinueToNext={handleContinueToNext}
+                onSkip={handleSkip}
+                skipPrompt={skipPrompt}
+                onSubmitSkipReason={handleSkipReason}
+                onRevealComplete={handleRevealComplete}
+                clearSceneToken={clearSceneToken}
+                submitError={submitError}
+              />
+            )}
+            {questionLoading && (
+              <p className="study-start__sub scratchpad-workspace__loading-overlay">
+                Generating next question…
+              </p>
+            )}
+            {submitError && phase === 'dialogue' && (
+              <p className="study-start__error scratchpad-workspace__toast" role="alert">
+                {submitError}
+              </p>
+            )}
+            <ScratchpadMetaDrawer
+              open={scratchpadMetaOpen}
+              conceptLabel={currentQuestion?.concept_label ?? '—'}
+              questionCount={questionCount}
+              maxQuestions={maxQuestions}
+              scalar={scalar}
+              masteryItems={liveMasteryItems}
+              history={history}
+            />
+          </div>
+        </div>
+      ) : (
       <div className="study-layout">
         <div className="study-layout__question">
           {questionLoading && (
@@ -1383,6 +1656,7 @@ export function Study() {
           <QuestionHistoryCard records={history} />
         </aside>
       </div>
+      )}
 
       {exitConfirmOpen && (
         <div className="study-exit-modal" role="presentation">

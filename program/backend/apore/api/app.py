@@ -26,6 +26,7 @@ from apore.api.schemas import (
     CreateChapterRequest,
     CreateDomainRequest,
     DomainGraphResponse,
+    FeedbackRegion,
     GraphChapterView,
     GraphConceptView,
     RenameChapterRequest,
@@ -48,6 +49,8 @@ from apore.api.schemas import (
     QuestionBankResponse,
     QuestionRequest,
     QuestionResponse,
+    ScratchpadScenePayload,
+    ScratchpadSceneResponse,
     SessionHistoryMessageView,
     SessionHistoryQuestionView,
     SessionListResponse,
@@ -77,7 +80,14 @@ from apore.knowledge.chapter import (
     resolve_wiki_page,
 )
 from apore.providers import get_provider
-from apore.runtime import state
+from apore.providers.multimodal import (
+    MultimodalError,
+    build_user_content,
+    content_display_text,
+    content_has_image,
+    persistable_content,
+)
+from apore.runtime import scratchpad_store, state
 from apore.runtime.bkt import DEFAULT_PARAMS
 from apore.runtime.mastery import (
     ConceptMasteryDelta,
@@ -152,7 +162,7 @@ class PendingGrading:
     learner_response: str
     assessment: AssessmentResult
     # Future multi-turn Socratic: append Teacher/learner turns before assess_response.
-    dialogue_transcript: list[dict[str, str]] = field(default_factory=list)
+    dialogue_transcript: list[dict] = field(default_factory=list)
     assisted: bool = False
 
 
@@ -163,7 +173,7 @@ class ReflectionState:
     question: GeneratedQuestion
     assessment: AssessmentResult
     grading: GradingResult
-    transcript: list[dict[str, str]] = field(default_factory=list)
+    transcript: list[dict] = field(default_factory=list)
     assisted: bool = False
 
 
@@ -178,6 +188,7 @@ class SessionState:
     question_count: int
     created_at: str
     focus_mode: str = "adaptive"
+    study_mode: str = "chat"
     max_questions: int = 10
     concept_ids: list[str] = field(default_factory=list)
     title_pending: bool = False
@@ -186,7 +197,7 @@ class SessionState:
     pending_question: GeneratedQuestion | None = None
     pending_grading: PendingGrading | None = None
     reflection: ReflectionState | None = None
-    active_transcript: list[dict[str, str]] = field(default_factory=list)
+    active_transcript: list[dict] = field(default_factory=list)
     awaiting_skip_reason: bool = False
     tutor_mode: bool = False
     active_concept_id: str | None = None
@@ -223,6 +234,59 @@ def _normalize_focus_mode(body: CreateSessionRequest) -> str:
             detail='focus_mode must be "adaptive" or "weak_points"',
         )
     return mode
+
+
+def _normalize_study_mode(body: CreateSessionRequest) -> str:
+    mode = (body.study_mode or "chat").strip().lower()
+    if mode not in ("chat", "scratchpad"):
+        raise HTTPException(
+            status_code=400,
+            detail='study_mode must be "chat" or "scratchpad"',
+        )
+    return mode
+
+
+def _feedback_region_views(regions: list | None) -> list[FeedbackRegion]:
+    if not regions:
+        return []
+    out: list[FeedbackRegion] = []
+    for region in regions:
+        out.append(
+            FeedbackRegion(
+                x=float(region.x),
+                y=float(region.y),
+                w=float(region.w),
+                h=float(region.h),
+                label=str(getattr(region, "label", "") or ""),
+                explanation=str(getattr(region, "explanation", "") or ""),
+            )
+        )
+    return out
+
+
+def _dialogue_message_views(messages: list[dict]) -> list[DialogueMessageView]:
+    views: list[DialogueMessageView] = []
+    for m in messages:
+        role = m.get("role")
+        if not role:
+            continue
+        content = m.get("content")
+        if content is None:
+            continue
+        text = content_display_text(content)
+        attachment = "scratchpad_selection" if content_has_image(content) else None
+        if attachment and text == "[Scratchpad selection]":
+            pass
+        elif attachment is None and not str(text).strip():
+            continue
+        views.append(
+            DialogueMessageView(
+                role=str(role),
+                content=text,
+                attachment=attachment,  # type: ignore[arg-type]
+            )
+        )
+    return views
 
 
 def _resolve_session_concept_ids(
@@ -339,6 +403,7 @@ def _session_state_response(sess: SessionState) -> SessionStateResponse:
         mastery_delta=_session_mastery_delta(sess),
         knowledge_source=sess.knowledge_source,
         focus_mode=sess.focus_mode,
+        study_mode=sess.study_mode,
         max_questions=sess.max_questions,
         questions_remaining=remaining,
         active_concept_id=sess.active_concept_id,
@@ -417,19 +482,26 @@ def _deserialize_grading(data: dict[str, Any]) -> GradingResult:
     )
 
 
-def _messages_copy(messages: list[dict[str, str]]) -> list[dict[str, str]]:
-    return [
-        {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
-        for m in messages
-        if m.get("role") is not None and m.get("content") is not None
-    ]
+def _messages_copy(messages: list[dict]) -> list[dict]:
+    """Copy messages for persistence, collapsing inline images to display text."""
+    out: list[dict] = []
+    for m in messages:
+        if m.get("role") is None or m.get("content") is None:
+            continue
+        out.append(
+            {
+                "role": str(m.get("role", "")),
+                "content": persistable_content(m.get("content")),
+            }
+        )
+    return out
 
 
 def _question_history_item(
     q: GeneratedQuestion,
     *,
     status: str,
-    messages: list[dict[str, str]],
+    messages: list[dict],
     correct: str | None = None,
     explicit_rating: str | None = None,
     assisted: bool = False,
@@ -578,7 +650,7 @@ def _session_ui_phase(sess: SessionState) -> str:
     return "idle"
 
 
-def _session_dialogue_messages(sess: SessionState) -> list[dict[str, str]]:
+def _session_dialogue_messages(sess: SessionState) -> list[dict]:
     if sess.reflection is not None:
         return list(sess.reflection.transcript)
     if sess.pending_grading is not None:
@@ -586,6 +658,24 @@ def _session_dialogue_messages(sess: SessionState) -> list[dict[str, str]]:
     if sess.pending_question is not None:
         return list(sess.active_transcript)
     return []
+
+
+def _scratchpad_scene_for_session(sess: SessionState) -> ScratchpadScenePayload | None:
+    if sess.study_mode != "scratchpad":
+        return None
+    qn: int | None = None
+    if sess.pending_question is not None:
+        qn = sess.pending_question.question_number
+    elif sess.pending_grading is not None:
+        qn = sess.pending_grading.question.question_number
+    elif sess.reflection is not None:
+        qn = sess.reflection.question.question_number
+    if qn is None:
+        return None
+    scene = scratchpad_store.read_scene(sess.state_path, qn)
+    if scene is None:
+        return None
+    return ScratchpadScenePayload(**scene)
 
 
 def _pending_question_view(sess: SessionState) -> PendingQuestionView | None:
@@ -686,11 +776,7 @@ def _resume_session_response(sess: SessionState) -> ResumeSessionResponse:
         **base.model_dump(),
         phase=_session_ui_phase(sess),  # type: ignore[arg-type]
         pending_question=_pending_question_view(sess),
-        dialogue_messages=[
-            DialogueMessageView(role=m["role"], content=m["content"])
-            for m in _session_dialogue_messages(sess)
-            if m.get("role") and m.get("content") is not None
-        ],
+        dialogue_messages=_dialogue_message_views(_session_dialogue_messages(sess)),
         awaiting_skip_reason=sess.awaiting_skip_reason,
         tutor_mode=sess.tutor_mode,
         history=_resume_history_items(sess),
@@ -703,6 +789,7 @@ def _resume_session_response(sess: SessionState) -> ResumeSessionResponse:
         explicit_rating=explicit_rating,
         reward=reward,
         new_difficulty=new_difficulty,
+        scratchpad_scene=_scratchpad_scene_for_session(sess),
     )
 
 
@@ -720,7 +807,14 @@ def _apply_runtime_to_session(sess: SessionState, runtime: dict[str, Any]) -> No
     sess.active_concept_id = str(active_concept) if active_concept else None
     transcript = runtime.get("active_transcript") or []
     sess.active_transcript = (
-        [{"role": str(m.get("role", "")), "content": str(m.get("content", ""))} for m in transcript]
+        [
+            {
+                "role": str(m.get("role", "")),
+                "content": persistable_content(m.get("content")),
+            }
+            for m in transcript
+            if isinstance(m, dict) and m.get("role") is not None and m.get("content") is not None
+        ]
         if isinstance(transcript, list)
         else []
     )
@@ -746,9 +840,12 @@ def _apply_runtime_to_session(sess: SessionState, runtime: dict[str, Any]) -> No
             learner_response=str(pg.get("learner_response") or ""),
             assessment=_deserialize_assessment(pg.get("assessment") or {}),
             dialogue_transcript=[
-                {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+                {
+                    "role": str(m.get("role", "")),
+                    "content": persistable_content(m.get("content")),
+                }
                 for m in (pg.get("dialogue_transcript") or [])
-                if isinstance(m, dict)
+                if isinstance(m, dict) and m.get("role") is not None and m.get("content") is not None
             ],
             assisted=bool(pg.get("assisted") or False),
         )
@@ -762,9 +859,12 @@ def _apply_runtime_to_session(sess: SessionState, runtime: dict[str, Any]) -> No
             assessment=_deserialize_assessment(ref.get("assessment") or {}),
             grading=_deserialize_grading(ref.get("grading") or {}),
             transcript=[
-                {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+                {
+                    "role": str(m.get("role", "")),
+                    "content": persistable_content(m.get("content")),
+                }
                 for m in (ref.get("transcript") or [])
-                if isinstance(m, dict)
+                if isinstance(m, dict) and m.get("role") is not None and m.get("content") is not None
             ],
             assisted=bool(ref.get("assisted") or False),
         )
@@ -818,6 +918,9 @@ def _hydrate_session_from_disk(session_id: str) -> SessionState:
     focus_mode = meta.get("focus_mode") or "adaptive"
     if focus_mode not in ("adaptive", "weak_points"):
         focus_mode = "adaptive"
+    study_mode = meta.get("study_mode") or "chat"
+    if study_mode not in ("chat", "scratchpad"):
+        study_mode = "chat"
     concept_ids = state.parse_concept_ids(meta.get("concept_ids"))
     try:
         scalar = state.read_scalar(path)
@@ -837,6 +940,7 @@ def _hydrate_session_from_disk(session_id: str) -> SessionState:
         question_count=question_count,
         created_at=meta.get("created_at") or "",
         focus_mode=focus_mode,
+        study_mode=study_mode,
         max_questions=max_questions,
         concept_ids=concept_ids,
         status=status,
@@ -1103,14 +1207,15 @@ def _grade_pending_dialogue(
         raise HTTPException(status_code=409, detail="No pending question to grade")
 
     transcript = list(sess.active_transcript)
-    last_user = next(
+    last_raw = next(
         (m["content"] for m in reversed(transcript) if m["role"] == "user"),
         "",
     )
+    last_user = content_display_text(last_raw)
     assisted = sess.tutor_mode
     assessment = assess_response(
         question=pending,
-        learner_response=last_user,
+        learner_response=last_raw,
         chapter=sess.chapter,
         state_path=sess.state_path,
         provider=provider,
@@ -1123,7 +1228,7 @@ def _grade_pending_dialogue(
         question=pending,
         learner_response=last_user,
         assessment=assessment,
-        dialogue_transcript=transcript,
+        dialogue_transcript=_messages_copy(transcript),
         assisted=assisted,
     )
     sess.pending_question = None
@@ -1151,6 +1256,7 @@ def _turn_response_from_grading(
     tutor_message: str | None = None,
     mode: str = "answer",
     assisted: bool = False,
+    feedback_regions: list | None = None,
 ) -> TurnResponse:
     return TurnResponse(
         phase=phase,
@@ -1167,6 +1273,7 @@ def _turn_response_from_grading(
         inconsistency_flag=grading.inconsistency_flag,
         flag_reason=flag_reason,
         assisted=assisted,
+        feedback_regions=_feedback_region_views(feedback_regions),
     )
 
 
@@ -1289,6 +1396,7 @@ def _build_metadata(sess: SessionState) -> dict:
 def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
     knowledge_source = _normalize_knowledge_source(body)
     focus_mode = _normalize_focus_mode(body)
+    study_mode = _normalize_study_mode(body)
     try:
         chapter = resolve_chapter(knowledge_source, PROGRAM_ROOT)
     except (FileNotFoundError, ValueError) as exc:
@@ -1317,6 +1425,7 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
         focus_mode=focus_mode,
         max_questions=body.max_questions,
         concept_ids=concept_ids,
+        study_mode=study_mode,
     )
 
     sess = SessionState(
@@ -1329,6 +1438,7 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
         question_count=0,
         created_at=now,
         focus_mode=focus_mode,
+        study_mode=study_mode,
         max_questions=body.max_questions,
         concept_ids=concept_ids,
         asked_question_ids=state.read_asked_ids(state_path),
@@ -1346,6 +1456,7 @@ def create_session(body: CreateSessionRequest) -> CreateSessionResponse:
         created_at=now,
         knowledge_source=knowledge_source,
         focus_mode=focus_mode,
+        study_mode=study_mode,
         max_questions=body.max_questions,
         concept_ids=concept_ids,
         title_pending=title_pending,
@@ -1423,6 +1534,7 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
             focus_mode=sess.focus_mode,
             last_concept_id=sess.active_concept_id,
             allowed_concept_ids=allowed,
+            study_mode=sess.study_mode,
         )
     except QuestionBankExhaustedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1466,26 +1578,286 @@ def post_turn(session_id: str, body: TurnRequest) -> TurnResponse:
 def _post_turn_inner(sess: SessionState, body: TurnRequest) -> TurnResponse:
     learner_message = (body.learner_message or body.learner_response or "").strip()
     skip_reason = (body.skip_reason or "").strip()
-    has_message = bool(learner_message)
+    scratchpad_action = body.scratchpad_action
+    learner_image = (body.learner_image or "").strip() or None
+    has_scratchpad = scratchpad_action is not None
+    has_message = bool(learner_message) and not has_scratchpad
     has_rating = bool(body.explicit_rating and body.explicit_rating.strip())
     has_skip = body.skip is True
     has_skip_reason = bool(skip_reason)
     has_continue = body.continue_to_next is True
 
+    if has_scratchpad:
+        if scratchpad_action not in ("ask", "submit"):
+            raise HTTPException(
+                status_code=400,
+                detail='scratchpad_action must be "ask" or "submit"',
+            )
+        if not learner_image:
+            raise HTTPException(
+                status_code=400,
+                detail="scratchpad_action requires learner_image (PNG/JPEG data URI)",
+            )
+        if sess.study_mode != "scratchpad":
+            raise HTTPException(
+                status_code=400,
+                detail="scratchpad_action is only valid for scratchpad sessions",
+            )
+
     action_count = sum(
-        [has_message, has_rating, has_skip, has_skip_reason, has_continue]
+        [
+            has_message,
+            has_scratchpad,
+            has_rating,
+            has_skip,
+            has_skip_reason,
+            has_continue,
+        ]
     )
     if action_count != 1:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Send exactly one of: learner_message, skip, skip_reason, "
-                "explicit_rating, or continue"
+                "Send exactly one of: learner_message, scratchpad_action, skip, "
+                "skip_reason, explicit_rating, or continue"
             ),
         )
 
     provider, model = _require_provider()
 
+    if has_scratchpad:
+        return _handle_scratchpad_turn(
+            sess,
+            provider=provider,
+            model=model,
+            action=scratchpad_action,  # type: ignore[arg-type]
+            learner_message=learner_message,
+            learner_image=learner_image,  # type: ignore[arg-type]
+        )
+
+    return _post_turn_after_scratchpad_guard(
+        sess,
+        body,
+        learner_message=learner_message,
+        skip_reason=skip_reason,
+        has_message=has_message,
+        has_rating=has_rating,
+        has_skip=has_skip,
+        has_skip_reason=has_skip_reason,
+        has_continue=has_continue,
+        provider=provider,
+        model=model,
+    )
+
+
+def _handle_scratchpad_turn(
+    sess: SessionState,
+    *,
+    provider,
+    model: str,
+    action: str,
+    learner_message: str,
+    learner_image: str,
+) -> TurnResponse:
+    """Ask about or submit a selected scratchpad region (multimodal)."""
+    if sess.pending_question is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No pending question; call POST /sessions/{id}/question first",
+        )
+    if sess.pending_grading is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Submit a difficulty rating before continuing dialogue",
+        )
+    if sess.reflection is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Finish reflection or continue to the next question first",
+        )
+    if sess.awaiting_skip_reason:
+        raise HTTPException(
+            status_code=409,
+            detail="Finish the skip flow before using the scratchpad",
+        )
+
+    try:
+        content = build_user_content(
+            text=learner_message or None,
+            image_data_uri=learner_image,
+        )
+    except MultimodalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    pending = sess.pending_question
+    sess.active_transcript.append({"role": "user", "content": content})
+
+    def _persist_selection_display() -> str:
+        """Write crop sidecar and return transcript text with a path reference."""
+        image_path = scratchpad_store.write_selection_image(
+            sess.state_path,
+            question_number=pending.question_number,
+            action=action,
+            data_uri=learner_image,
+        )
+        relative = scratchpad_store.selection_ref_or_raise(image_path, sess.state_path)
+        return scratchpad_store.selection_display_text(
+            learner_message=learner_message,
+            relative_name=relative,
+        )
+
+    if action == "ask":
+        sess.tutor_mode = True
+        try:
+            turn = tutor_turn(
+                question=pending,
+                dialogue_transcript=sess.active_transcript[:-1],
+                learner_message=content,
+                chapter=sess.chapter,
+                state_path=sess.state_path,
+                provider=provider,
+                model=model,
+                config={},
+                program_root=PROGRAM_ROOT,
+                protocol="scratchpad-ask",
+            )
+        except Exception as exc:
+            # Roll back the unsent user turn so retries stay clean.
+            sess.active_transcript.pop()
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Scratchpad ask failed ({type(exc).__name__}): {exc}. "
+                    "Confirm the configured model supports image input."
+                ),
+            ) from exc
+
+        # Replace in-memory multimodal content with persistable display text.
+        sess.active_transcript[-1] = {
+            "role": "user",
+            "content": _persist_selection_display(),
+        }
+        tutor_message = f"{TUTOR_MODE_NOTICE}\n\n{turn.tutor_message}"
+        sess.active_transcript.append({"role": "assistant", "content": tutor_message})
+        regions = _feedback_region_views(turn.feedback_regions)
+
+        if turn.question_closed:
+            response = _grade_pending_dialogue(
+                sess,
+                provider=provider,
+                model=model,
+                tutor_message=tutor_message,
+            )
+            response.feedback_regions = regions
+            return response
+
+        return TurnResponse(
+            phase="dialogue",
+            question_number=pending.question_number,
+            tutor_message=tutor_message,
+            question_closed=False,
+            mode="tutor",
+            feedback_regions=regions,
+        )
+
+    # submit → grade
+    try:
+        grade = grade_answer_turn(
+            question=pending,
+            dialogue_transcript=sess.active_transcript[:-1],
+            learner_message=content,
+            chapter=sess.chapter,
+            state_path=sess.state_path,
+            provider=provider,
+            model=model,
+            config={},
+            program_root=PROGRAM_ROOT,
+            protocol="scratchpad-grade",
+        )
+    except Exception as exc:
+        sess.active_transcript.pop()
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Scratchpad submit failed ({type(exc).__name__}): {exc}. "
+                "Confirm the configured model supports image input."
+            ),
+        ) from exc
+
+    sess.active_transcript[-1] = {
+        "role": "user",
+        "content": _persist_selection_display(),
+    }
+    regions = _feedback_region_views(grade.feedback_regions)
+
+    if grade.help_request:
+        sess.tutor_mode = True
+        try:
+            turn = tutor_turn(
+                question=pending,
+                dialogue_transcript=sess.active_transcript[:-1],
+                learner_message=content,
+                chapter=sess.chapter,
+                state_path=sess.state_path,
+                provider=provider,
+                model=model,
+                config={},
+                program_root=PROGRAM_ROOT,
+                protocol="scratchpad-ask",
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Scratchpad help redirect failed ({type(exc).__name__}): {exc}."
+                ),
+            ) from exc
+        tutor_message = f"{TUTOR_MODE_NOTICE}\n\n{turn.tutor_message}"
+        sess.active_transcript.append({"role": "assistant", "content": tutor_message})
+        ask_regions = _feedback_region_views(turn.feedback_regions) or regions
+        if turn.question_closed:
+            response = _grade_pending_dialogue(
+                sess,
+                provider=provider,
+                model=model,
+                tutor_message=tutor_message,
+            )
+            response.feedback_regions = ask_regions
+            return response
+        return TurnResponse(
+            phase="dialogue",
+            question_number=pending.question_number,
+            tutor_message=tutor_message,
+            question_closed=False,
+            mode="tutor",
+            feedback_regions=ask_regions,
+        )
+
+    sess.active_transcript.append({"role": "assistant", "content": grade.tutor_message})
+    response = _grade_pending_dialogue(
+        sess,
+        provider=provider,
+        model=model,
+        tutor_message=grade.tutor_message,
+    )
+    response.feedback_regions = regions
+    return response
+
+
+def _post_turn_after_scratchpad_guard(
+    sess: SessionState,
+    body: TurnRequest,
+    *,
+    learner_message: str,
+    skip_reason: str,
+    has_message: bool,
+    has_rating: bool,
+    has_skip: bool,
+    has_skip_reason: bool,
+    has_continue: bool,
+    provider,
+    model: str,
+) -> TurnResponse:
     if has_continue:
         if sess.reflection is None:
             raise HTTPException(
@@ -1721,6 +2093,77 @@ def get_session_state(session_id: str) -> SessionStateResponse:
     return _session_state_response(sess)
 
 
+@app.put(
+    "/sessions/{session_id}/scratchpad/scene",
+    response_model=ScratchpadSceneResponse,
+)
+def put_scratchpad_scene(
+    session_id: str,
+    body: ScratchpadScenePayload,
+) -> ScratchpadSceneResponse:
+    sess = _get_session(session_id)
+    _require_active_session(sess)
+    if sess.study_mode != "scratchpad":
+        raise HTTPException(
+            status_code=400,
+            detail="Scratchpad scene is only available for scratchpad sessions",
+        )
+    if body.question_number < 1:
+        raise HTTPException(status_code=400, detail="question_number must be >= 1")
+    # Only allow autosave for the currently open question.
+    current_qn: int | None = None
+    if sess.pending_question is not None:
+        current_qn = sess.pending_question.question_number
+    elif sess.pending_grading is not None:
+        current_qn = sess.pending_grading.question.question_number
+    elif sess.reflection is not None:
+        current_qn = sess.reflection.question.question_number
+    if current_qn is None or body.question_number != current_qn:
+        raise HTTPException(
+            status_code=409,
+            detail="Scratchpad scene must match the active question number",
+        )
+    scratchpad_store.write_scene(
+        sess.state_path,
+        question_number=body.question_number,
+        schema_version=body.schema_version,
+        engine=body.engine,
+        nodes=[node.model_dump() for node in body.nodes],
+        camera=body.camera.model_dump(),
+        last_export_bounds=(
+            body.last_export_bounds.model_dump()
+            if body.last_export_bounds is not None
+            else None
+        ),
+        feedback_regions=[region.model_dump() for region in body.feedback_regions],
+        annotations=[annotation.model_dump() for annotation in body.annotations],
+    )
+    return ScratchpadSceneResponse(question_number=body.question_number, scene=body)
+
+
+@app.get(
+    "/sessions/{session_id}/scratchpad/scene",
+    response_model=ScratchpadSceneResponse,
+)
+def get_scratchpad_scene(
+    session_id: str,
+    question_number: int,
+) -> ScratchpadSceneResponse:
+    sess = _get_session(session_id)
+    if sess.study_mode != "scratchpad":
+        raise HTTPException(
+            status_code=400,
+            detail="Scratchpad scene is only available for scratchpad sessions",
+        )
+    scene = scratchpad_store.read_scene(sess.state_path, question_number)
+    if scene is None:
+        return ScratchpadSceneResponse(question_number=question_number, scene=None)
+    return ScratchpadSceneResponse(
+        question_number=question_number,
+        scene=ScratchpadScenePayload(**scene),
+    )
+
+
 @app.post("/sessions/{session_id}/resume", response_model=ResumeSessionResponse)
 def resume_session(session_id: str) -> ResumeSessionResponse:
     """Hydrate a resumable session from disk into memory (idempotent if already live).
@@ -1947,7 +2390,7 @@ def _history_question_views(items: list[dict[str, Any]]) -> list[SessionHistoryQ
         messages = [
             SessionHistoryMessageView(
                 role=str(m.get("role") or ""),
-                content=str(m.get("content") or ""),
+                content=content_display_text(m.get("content")),
             )
             for m in (item.get("messages") or [])
             if isinstance(m, dict)
@@ -2340,6 +2783,7 @@ def put_domain_question_bank(
                 type=q.type.lower(),
                 intended_difficulty=q.intended_difficulty,
                 text=q.text.strip(),
+                scratchpad_eligible=q.scratchpad_eligible,
             )
             for q in body.questions
         ],
@@ -2368,6 +2812,7 @@ def post_domain_question(
         type=body.type.lower(),
         intended_difficulty=body.intended_difficulty,
         text=body.text.strip(),
+        scratchpad_eligible=body.scratchpad_eligible,
     )
     try:
         add_question(root, entry, graph=graph)
@@ -2397,6 +2842,7 @@ def patch_domain_question(
             type=body.type.lower(),
             intended_difficulty=body.intended_difficulty,
             text=body.text.strip(),
+            scratchpad_eligible=body.scratchpad_eligible,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -2467,6 +2913,7 @@ def put_fixture_question_bank(
                 type=q.type.lower(),
                 intended_difficulty=q.intended_difficulty,
                 text=q.text.strip(),
+                scratchpad_eligible=q.scratchpad_eligible,
             )
             for q in body.questions
         ],
@@ -2491,6 +2938,7 @@ def post_fixture_question(name: str, body: QuestionBankEntry) -> QuestionBankRes
         type=body.type.lower(),
         intended_difficulty=body.intended_difficulty,
         text=body.text.strip(),
+        scratchpad_eligible=body.scratchpad_eligible,
     )
     try:
         add_question(root, entry, graph=graph)
@@ -2517,6 +2965,7 @@ def patch_fixture_question(
             type=body.type.lower(),
             intended_difficulty=body.intended_difficulty,
             text=body.text.strip(),
+            scratchpad_eligible=body.scratchpad_eligible,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

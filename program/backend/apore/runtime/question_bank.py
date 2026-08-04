@@ -23,6 +23,7 @@ class BankQuestion:
     type: str
     intended_difficulty: float
     text: str
+    scratchpad_eligible: bool = False
 
 
 @dataclass
@@ -50,6 +51,7 @@ class QuestionBank:
                     type=str(qtype).lower(),
                     intended_difficulty=float(item.get("intended_difficulty", 0.5)),
                     text=str(text).strip(),
+                    scratchpad_eligible=bool(item.get("scratchpad_eligible", False)),
                 )
             )
         return cls(version=version, questions=questions)
@@ -64,6 +66,7 @@ class QuestionBank:
                     "type": q.type,
                     "intended_difficulty": round(q.intended_difficulty, 2),
                     "text": q.text,
+                    "scratchpad_eligible": q.scratchpad_eligible,
                 }
                 for q in self.questions
             ],
@@ -129,6 +132,7 @@ def select_concept_for_burst(
     mastery: dict[str, float] | None,
     bank: QuestionBank,
     allowed_concept_ids: set[str] | None = None,
+    scratchpad_only: bool = False,
 ) -> str:
     """Pick concept by depth tier for calibration burst (questions 1–3)."""
     burst_index = question_number - 1
@@ -148,14 +152,14 @@ def select_concept_for_burst(
         for n in graph.nodes.values()
         if n.depth == target_depth
         and _concept_allowed(n.id, allowed_concept_ids)
-        and _concept_has_bank_questions(bank, n.id)
+        and _concept_has_bank_questions(bank, n.id, scratchpad_only=scratchpad_only)
     ]
     if not candidates:
         candidates = [
             n
             for n in graph.nodes.values()
             if _concept_allowed(n.id, allowed_concept_ids)
-            and _concept_has_bank_questions(bank, n.id)
+            and _concept_has_bank_questions(bank, n.id, scratchpad_only=scratchpad_only)
         ]
     if not candidates:
         return select_next_concept(
@@ -174,8 +178,17 @@ def _concept_allowed(concept_id: str, allowed_concept_ids: set[str] | None) -> b
     return concept_id in allowed_concept_ids
 
 
-def _concept_has_bank_questions(bank: QuestionBank, concept_id: str) -> bool:
-    return any(q.concept_id == concept_id for q in bank.questions)
+def _concept_has_bank_questions(
+    bank: QuestionBank,
+    concept_id: str,
+    *,
+    scratchpad_only: bool = False,
+) -> bool:
+    return any(
+        q.concept_id == concept_id
+        and (not scratchpad_only or q.scratchpad_eligible)
+        for q in bank.questions
+    )
 
 
 def _depth_tiers(
@@ -219,9 +232,14 @@ def _matching_candidates(
     qtype: str,
     asked_ids: set[str],
     allow_reuse: bool,
+    scratchpad_only: bool = False,
 ) -> list[BankQuestion]:
     matches = [
-        q for q in bank.questions if q.concept_id == concept_id and q.type == qtype
+        q
+        for q in bank.questions
+        if q.concept_id == concept_id
+        and q.type == qtype
+        and (not scratchpad_only or q.scratchpad_eligible)
     ]
     if not allow_reuse:
         matches = [q for q in matches if q.id not in asked_ids]
@@ -256,6 +274,7 @@ def _pick_from_concepts(
     type_order: list[str],
     asked_ids: set[str],
     allow_reuse: bool,
+    scratchpad_only: bool = False,
 ) -> BankQuestion | None:
     for cid in concept_ids:
         for try_type in type_order:
@@ -265,6 +284,7 @@ def _pick_from_concepts(
                 qtype=try_type,
                 asked_ids=asked_ids,
                 allow_reuse=allow_reuse,
+                scratchpad_only=scratchpad_only,
             )
             if candidates:
                 return candidates[0]
@@ -305,14 +325,21 @@ def select_question(
     focus_mode: str = "adaptive",
     last_concept_id: str | None = None,
     allowed_concept_ids: set[str] | None = None,
+    study_mode: str = "chat",
 ) -> BankQuestion:
     """Select a bank question; avoid back-to-back same concept, prefer unused IDs."""
     mastery = mastery or {}
     weak_only = focus_mode == "weak_points"
     allowed = allowed_concept_ids
+    scratchpad_only = study_mode == "scratchpad"
 
     if allowed is not None and not allowed:
         raise QuestionBankExhaustedError("No concepts selected for this session")
+
+    if scratchpad_only and not any(q.scratchpad_eligible for q in bank.questions):
+        raise QuestionBankExhaustedError(
+            "No scratchpad-eligible questions available for this chapter"
+        )
 
     if weak_only:
         weak_ids = _weak_concept_ids(graph, mastery, allowed_concept_ids=allowed)
@@ -337,6 +364,7 @@ def select_question(
             mastery=mastery,
             bank=bank,
             allowed_concept_ids=allowed,
+            scratchpad_only=scratchpad_only,
         )
         qtype = burst_type_for_index(question_number - 1)
         concept_ids_to_try = [selected_id]
@@ -344,7 +372,11 @@ def select_question(
             pool = [
                 n.id
                 for n in sorted(graph.nodes.values(), key=lambda n: (n.depth, n.id))
-                if n.id != selected_id and _concept_allowed(n.id, allowed)
+                if n.id != selected_id
+                and _concept_allowed(n.id, allowed)
+                and _concept_has_bank_questions(
+                    bank, n.id, scratchpad_only=scratchpad_only
+                )
             ]
             concept_ids_to_try.extend(pool)
     else:
@@ -361,7 +393,11 @@ def select_question(
             pool = [
                 n.id
                 for n in sorted(graph.nodes.values(), key=lambda n: (n.depth, n.id))
-                if n.id != selected_id and _concept_allowed(n.id, allowed)
+                if n.id != selected_id
+                and _concept_allowed(n.id, allowed)
+                and _concept_has_bank_questions(
+                    bank, n.id, scratchpad_only=scratchpad_only
+                )
             ]
             concept_ids_to_try.extend(pool)
 
@@ -369,7 +405,17 @@ def select_question(
     concept_ids_to_try = [
         cid for cid in concept_ids_to_try if _concept_allowed(cid, allowed)
     ]
+    if scratchpad_only:
+        concept_ids_to_try = [
+            cid
+            for cid in concept_ids_to_try
+            if _concept_has_bank_questions(bank, cid, scratchpad_only=True)
+        ]
     if not concept_ids_to_try:
+        if scratchpad_only:
+            raise QuestionBankExhaustedError(
+                "No scratchpad-eligible questions available for the selected concepts"
+            )
         raise QuestionBankExhaustedError(
             "No questions available for the selected concepts in this session"
         )
@@ -386,6 +432,7 @@ def select_question(
         type_order=downward_types,
         asked_ids=asked_ids,
         allow_reuse=False,
+        scratchpad_only=scratchpad_only,
     )
     if picked:
         return picked
@@ -397,6 +444,7 @@ def select_question(
         type_order=downward_types,
         asked_ids=asked_ids,
         allow_reuse=True,
+        scratchpad_only=scratchpad_only,
     )
     if picked:
         return picked
@@ -409,6 +457,7 @@ def select_question(
             type_order=upward_types,
             asked_ids=asked_ids,
             allow_reuse=True,
+            scratchpad_only=scratchpad_only,
         )
         if picked:
             return picked
@@ -422,10 +471,15 @@ def select_question(
             type_order=all_types,
             asked_ids=asked_ids,
             allow_reuse=True,
+            scratchpad_only=scratchpad_only,
         )
         if picked:
             return picked
 
+    if scratchpad_only:
+        raise QuestionBankExhaustedError(
+            "No scratchpad-eligible questions available for this session"
+        )
     if weak_only:
         raise QuestionBankExhaustedError(
             "No unused questions remain for weak concepts in this session"

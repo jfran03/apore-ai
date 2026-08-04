@@ -25,6 +25,7 @@ def _bank_response(messages: list[dict]) -> str:
                     "type": qtype,
                     "intended_difficulty": diff,
                     "text": f"[{qtype}] Question about {concept_id.replace('_', ' ')} ({idx}).",
+                    "scratchpad_eligible": qtype in ("apply", "synthesis"),
                 }
             )
     return json.dumps({"questions": questions})

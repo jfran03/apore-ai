@@ -60,6 +60,24 @@ def test_parse_grade_answer_correct():
     assert help_request is False
     assert text.startswith("Correct.")
     assert regions == []
+    assert "question_closed" not in text
+
+
+def test_parse_grade_answer_ignores_empty_set_braces():
+    """Empty-set notation `{}` must not prevent stripping the protocol trailer."""
+    raw = (
+        'Correct. The empty set is written ∅ or {}.\n\n'
+        '```json\n'
+        '{"question_closed": true, "correct": "yes", "feedback_regions": []}\n'
+        '```'
+    )
+    text, correct, help_request, regions = parse_grade_answer_response(raw)
+    assert correct is True
+    assert help_request is False
+    assert "empty set" in text.lower()
+    assert "question_closed" not in text
+    assert "```" not in text
+    assert regions == []
 
 
 def test_parse_grade_answer_incorrect():

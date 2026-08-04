@@ -38,10 +38,13 @@ def test_crud_roundtrip():
             "type": "recall",
             "intended_difficulty": 0.2,
             "text": "CRUD test question?",
+            "scratchpad_eligible": False,
         },
     )
     assert add_resp.status_code == 200
     assert any(q["id"] == new_id for q in add_resp.json()["questions"])
+    added = next(q for q in add_resp.json()["questions"] if q["id"] == new_id)
+    assert added["scratchpad_eligible"] is False
 
     patch_resp = client.patch(
         f"/setup/domains/{DOMAIN}/chapters/{CHAPTER}/question-bank/questions/{new_id}",
@@ -51,11 +54,13 @@ def test_crud_roundtrip():
             "type": "recall",
             "intended_difficulty": 0.22,
             "text": "CRUD test question updated?",
+            "scratchpad_eligible": True,
         },
     )
     assert patch_resp.status_code == 200
     updated = next(q for q in patch_resp.json()["questions"] if q["id"] == new_id)
     assert updated["intended_difficulty"] == pytest.approx(0.22)
+    assert updated["scratchpad_eligible"] is True
 
     del_resp = client.delete(
         f"/setup/domains/{DOMAIN}/chapters/{CHAPTER}/question-bank/questions/{new_id}"

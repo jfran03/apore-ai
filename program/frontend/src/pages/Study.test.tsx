@@ -1004,4 +1004,64 @@ describe('Study scratchpad mode', () => {
       'Give an example of a set.',
     );
   });
+
+  it('completes Skip → Why skip? → rating through skip_reason', async () => {
+    createSession.mockResolvedValue(
+      sessionResponse(['what_is_a_set'], { study_mode: 'scratchpad' }),
+    );
+    postTurn
+      .mockResolvedValueOnce({
+        phase: 'skip_prompt',
+        question_number: 1,
+        tutor_message: 'Before we move on — briefly, why do you want to skip this question?',
+        question_closed: false,
+        mode: 'assess',
+      })
+      .mockResolvedValueOnce({
+        phase: 'graded',
+        question_number: 1,
+        tutor_message: "Understood — we'll move on from this question.",
+        question_closed: true,
+        mode: 'assess',
+        correct: 'no',
+        hint_count: 0,
+        turn_count: 0,
+        hedging_count: 0,
+        inconsistency_flag: false,
+        assisted: false,
+      });
+
+    renderStudy();
+    await waitFor(() => expect(screen.getByText('Scratchpad Mode')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /Scratchpad Mode/i }));
+    await waitFor(() => expect(screen.getByLabelText(/What is a Set/i)).toBeChecked());
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Skip question/i }).length).toBeGreaterThan(0);
+    });
+    await userEvent.click(screen.getAllByRole('button', { name: /Skip question/i })[0]);
+
+    await waitFor(() => {
+      expect(postTurn).toHaveBeenCalledWith('sess-1', { skip: true });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Why skip?')).toBeInTheDocument();
+    });
+
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /Skip reason/i }),
+      'Already covered this',
+    );
+    await userEvent.click(screen.getByRole('button', { name: /^Continue$/i }));
+
+    await waitFor(() => {
+      expect(postTurn).toHaveBeenCalledWith('sess-1', {
+        skip_reason: 'Already covered this',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('How difficult was that?')).toBeInTheDocument();
+    });
+  });
 });

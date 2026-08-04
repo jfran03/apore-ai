@@ -132,9 +132,11 @@ class QuestionResult:
 
 
 def _strip_code_fence(text: str) -> str:
+    """Unwrap a message that is entirely wrapped in one markdown code fence."""
     lines = text.strip().splitlines()
-    if lines and lines[0].strip().startswith("```"):
-        lines = lines[1:]
+    if not lines or not lines[0].strip().startswith("```"):
+        return text.strip()
+    lines = lines[1:]
     if lines and lines[-1].strip() == "```":
         lines = lines[:-1]
     return "\n".join(lines).strip()
@@ -205,8 +207,14 @@ def _parse_question_block(raw: str) -> tuple[str, str, float, str]:
     return _parse_question_block_protocol(text)
 
 
-def _find_json_object(text: str) -> str | None:
-    """Return the first balanced {...} substring that parses as JSON."""
+_PROTOCOL_TRAILER_KEYS = frozenset(
+    {"question_closed", "correct", "feedback_regions", "help_request"}
+)
+_EMPTY_CODE_FENCE = re.compile(r"```(?:json)?\s*```", re.IGNORECASE)
+
+
+def _iter_json_objects(text: str):
+    """Yield balanced {...} substrings that parse as JSON, left to right."""
     for start in (i for i, ch in enumerate(text) if ch == "{"):
         depth = 0
         for i in range(start, len(text)):
@@ -220,8 +228,49 @@ def _find_json_object(text: str) -> str | None:
                         json.loads(candidate)
                     except json.JSONDecodeError:
                         break
-                    return candidate
-    return None
+                    yield candidate
+                    break
+
+
+def _find_json_object(text: str) -> str | None:
+    """Return the first balanced {...} substring that parses as JSON."""
+    return next(_iter_json_objects(text), None)
+
+
+def _find_protocol_trailer(text: str) -> str | None:
+    """Return the last JSON object that looks like a tutor/grade protocol trailer.
+
+    Prose often contains empty-set notation `{}` or other braces; matching the
+    first JSON object would leave the real trailer in the learner-visible text.
+    """
+    last: str | None = None
+    for candidate in _iter_json_objects(text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and _PROTOCOL_TRAILER_KEYS.intersection(parsed):
+            last = candidate
+    return last
+
+
+def _strip_json_trailer(text: str, json_obj: str) -> str:
+    """Remove a JSON trailer and any markdown fence that wrapped only that object."""
+    fenced = re.compile(
+        rf"```(?:json)?\s*\n?\s*{re.escape(json_obj)}\s*\n?\s*```",
+        re.IGNORECASE,
+    )
+    stripped = fenced.sub("", text, count=1)
+    if stripped == text:
+        # Opening fence may remain if a prior pass removed only the closer.
+        open_only = re.compile(
+            rf"```(?:json)?\s*\n?\s*{re.escape(json_obj)}",
+            re.IGNORECASE,
+        )
+        stripped = open_only.sub("", text, count=1)
+    if stripped == text:
+        stripped = text.replace(json_obj, "", 1)
+    return _EMPTY_CODE_FENCE.sub("", stripped).strip()
 
 
 def _parse_signals(raw: str) -> dict:
@@ -321,7 +370,7 @@ def parse_tutor_response(
     question_closed = bool(_TUTOR_CLOSE_PATTERN.search(text))
     regions: list[FeedbackRegionResult] = []
 
-    json_obj = _find_json_object(text)
+    json_obj = _find_protocol_trailer(text)
     if json_obj:
         try:
             parsed = json.loads(json_obj)
@@ -331,7 +380,7 @@ def parse_tutor_response(
             if parsed.get("question_closed"):
                 question_closed = True
             regions = parse_feedback_regions(parsed.get("feedback_regions"))
-            text = text.replace(json_obj, "").strip()
+            text = _strip_json_trailer(text, json_obj)
 
     return text.strip(), question_closed, regions
 
@@ -353,7 +402,7 @@ def parse_grade_answer_response(
     trailer_correct: str | None = None
     regions: list[FeedbackRegionResult] = []
 
-    json_obj = _find_json_object(text)
+    json_obj = _find_protocol_trailer(text)
     if json_obj:
         try:
             parsed = json.loads(json_obj)
@@ -366,7 +415,7 @@ def parse_grade_answer_response(
             if trailer_correct in ("yes", "no"):
                 correct = trailer_correct == "yes"
             regions = parse_feedback_regions(parsed.get("feedback_regions"))
-            text = text.replace(json_obj, "").strip()
+            text = _strip_json_trailer(text, json_obj)
 
     if has_incorrect:
         correct = False
@@ -514,6 +563,7 @@ def generate_question(
     focus_mode: str = "adaptive",
     last_concept_id: str | None = None,
     allowed_concept_ids: set[str] | None = None,
+    study_mode: str = "chat",
 ) -> GeneratedQuestion:
     """Select from question bank when present; otherwise fall back to LLM generation."""
     graph = load_concept_graph(chapter)
@@ -545,6 +595,7 @@ def generate_question(
             focus_mode=focus_mode,
             last_concept_id=last_concept_id,
             allowed_concept_ids=allowed_concept_ids,
+            study_mode=study_mode,
         )
         gen_response = format_question_block(entry, graph)
         concept_label = graph.label_for(entry.concept_id)

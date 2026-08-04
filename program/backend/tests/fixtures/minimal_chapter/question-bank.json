@@ -6,77 +6,88 @@
       "concept_id": "sets_definition",
       "type": "recall",
       "intended_difficulty": 0.25,
-      "text": "What is a set, in one sentence?"
+      "text": "What is a set, in one sentence?",
+      "scratchpad_eligible": false
     },
     {
       "id": "sets_definition-recall-02",
       "concept_id": "sets_definition",
       "type": "recall",
       "intended_difficulty": 0.3,
-      "text": "Must the elements of a set be distinct?"
+      "text": "Must the elements of a set be distinct?",
+      "scratchpad_eligible": false
     },
     {
       "id": "sets_definition-apply-01",
       "concept_id": "sets_definition",
       "type": "apply",
       "intended_difficulty": 0.5,
-      "text": "If A = {1, 2} and B = {2, 3}, what elements belong to A ∩ B?"
+      "text": "If A = {1, 2} and B = {2, 3}, what elements belong to A \u2229 B?",
+      "scratchpad_eligible": true
     },
     {
       "id": "sets_definition-apply-02",
       "concept_id": "sets_definition",
       "type": "apply",
       "intended_difficulty": 0.55,
-      "text": "Give an example of two sets that are disjoint."
+      "text": "Give an example of two sets that are disjoint.",
+      "scratchpad_eligible": true
     },
     {
       "id": "sets_definition-synthesis-01",
       "concept_id": "sets_definition",
       "type": "synthesis",
       "intended_difficulty": 0.75,
-      "text": "How does the definition of a set relate to counting whether order matters?"
+      "text": "How does the definition of a set relate to counting whether order matters?",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_theory_intro-recall-01",
       "concept_id": "set_theory_intro",
       "type": "recall",
       "intended_difficulty": 0.25,
-      "text": "What is the difference between a set and a multiset?"
+      "text": "What is the difference between a set and a multiset?",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_theory_intro-recall-02",
       "concept_id": "set_theory_intro",
       "type": "recall",
       "intended_difficulty": 0.3,
-      "text": "Why is the empty set a valid set?"
+      "text": "Why is the empty set a valid set?",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_theory_intro-apply-01",
       "concept_id": "set_theory_intro",
       "type": "apply",
       "intended_difficulty": 0.5,
-      "text": "How many elements does the empty set contain?"
+      "text": "How many elements does the empty set contain?",
+      "scratchpad_eligible": true
     },
     {
       "id": "set_theory_intro-apply-02",
       "concept_id": "set_theory_intro",
       "type": "apply",
       "intended_difficulty": 0.55,
-      "text": "If you list the elements of {a, b, a}, how many distinct elements are in the set?"
+      "text": "If you list the elements of {a, b, a}, how many distinct elements are in the set?",
+      "scratchpad_eligible": true
     },
     {
       "id": "set_theory_intro-synthesis-01",
       "concept_id": "set_theory_intro",
       "type": "synthesis",
       "intended_difficulty": 0.75,
-      "text": "When might a multiset be more appropriate than a set for modeling a collection?"
+      "text": "When might a multiset be more appropriate than a set for modeling a collection?",
+      "scratchpad_eligible": false
     },
     {
       "id": "set_theory_intro-synthesis-02",
       "concept_id": "set_theory_intro",
       "type": "synthesis",
       "intended_difficulty": 0.8,
-      "text": "Connect the idea of distinct elements in a set to why duplicate entries collapse when forming a set."
+      "text": "Connect the idea of distinct elements in a set to why duplicate entries collapse when forming a set.",
+      "scratchpad_eligible": false
     }
   ]
 }

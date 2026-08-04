@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 from fastapi.testclient import TestClient
 
@@ -179,6 +180,109 @@ def test_scratchpad_scene_roundtrip(monkeypatch):
     assert scene["camera"] == {"x": 1.0, "y": 2.0, "scale": 1.25}
     assert scene["last_export_bounds"]["padding"] == 4.0
     assert scene["feedback_regions"][0]["label"] == "Check"
+    assert scene.get("annotations") == []
+
+
+def test_scratchpad_scene_annotations_round_trip(monkeypatch):
+    client = TestClient(app)
+    monkeypatch.setattr("apore.api.app.get_provider", lambda _name: StubProvider())
+    monkeypatch.setattr("apore.api.app.get_active_provider", lambda: "stub")
+    monkeypatch.setattr("apore.api.app.get_active_model", lambda: "stub-model")
+
+    created = client.post(
+        "/sessions",
+        json={
+            "knowledge_source": "domain:discrete-math/01-set-theory",
+            "study_mode": "scratchpad",
+            "max_questions": 3,
+        },
+    )
+    assert created.status_code == 200, created.text
+    session_id = created.json()["session_id"]
+    q = client.post(f"/sessions/{session_id}/question", json={})
+    assert q.status_code == 200
+    qn = q.json()["question_number"]
+
+    put = client.put(
+        f"/sessions/{session_id}/scratchpad/scene",
+        json={
+            "question_number": qn,
+            "schema_version": 1,
+            "engine": "apore-konva",
+            "nodes": [
+                {
+                    "id": "a",
+                    "type": "rectangle",
+                    "x": 0,
+                    "y": 0,
+                    "width": 10,
+                    "height": 10,
+                    "stroke": "#26251e",
+                    "stroke_width": 2,
+                }
+            ],
+            "camera": {"x": 0, "y": 0, "scale": 1},
+            "last_export_bounds": None,
+            "feedback_regions": [],
+            "annotations": [
+                {
+                    "id": "ann-1",
+                    "node_ids": ["a"],
+                    "prompt": "Is this a set?",
+                    "response": "Check whether order matters.",
+                    "feedback_regions": [
+                        {
+                            "x": 0.1,
+                            "y": 0.2,
+                            "w": 0.3,
+                            "h": 0.25,
+                            "label": "Here",
+                            "explanation": "Revisit this mark",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    assert put.status_code == 200, put.text
+
+    got = client.get(
+        f"/sessions/{session_id}/scratchpad/scene",
+        params={"question_number": qn},
+    )
+    assert got.status_code == 200
+    scene = got.json()["scene"]
+    assert scene is not None
+    assert len(scene["annotations"]) == 1
+    assert scene["annotations"][0]["id"] == "ann-1"
+    assert scene["annotations"][0]["node_ids"] == ["a"]
+    assert scene["annotations"][0]["response"] == "Check whether order matters."
+    assert scene["annotations"][0]["feedback_regions"][0]["label"] == "Here"
+
+
+def test_legacy_scene_without_annotations_still_loads(tmp_path):
+    from apore.runtime import scratchpad_store
+
+    state_path = tmp_path / "session.md"
+    path = scratchpad_store.scene_path(state_path, 1)
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "question_number": 1,
+                "schema_version": 1,
+                "engine": "apore-konva",
+                "nodes": [],
+                "camera": {"x": 0, "y": 0, "scale": 1},
+                "last_export_bounds": None,
+                "feedback_regions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    scene = scratchpad_store.read_scene(state_path, 1)
+    assert scene is not None
+    assert scene["annotations"] == []
 
 
 def test_legacy_excalidraw_scene_is_treated_as_absent(tmp_path):

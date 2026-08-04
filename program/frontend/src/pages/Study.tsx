@@ -22,6 +22,7 @@ import type {
   StudyMode,
   TurnResponse,
 } from '../api/types';
+import { stripProtocolTrailer } from '../api/protocolText';
 import { parseKnowledgeSource, useActiveDomain } from '../shell/ActiveDomainContext';
 import { useStudyFocus } from '../shell/StudyFocusContext';
 import { QuestionCard } from '../components/QuestionCard';
@@ -160,6 +161,7 @@ function buildCurrentQuestion(q: QuestionResponse): CurrentQuestion {
 }
 
 function gradeFromTurn(res: TurnResponse): GradeResult {
+  const feedback = stripProtocolTrailer(res.tutor_message ?? '') || null;
   return {
     question_number: res.question_number,
     correct: res.correct,
@@ -168,6 +170,7 @@ function gradeFromTurn(res: TurnResponse): GradeResult {
     hedging_count: res.hedging_count,
     flag_reason: res.flag_reason,
     assisted: res.assisted === true,
+    feedback,
   };
 }
 
@@ -195,6 +198,15 @@ function sessionFromResume(res: ResumeSessionResponse): SessionState {
   else if (res.phase === 'graded') phase = 'rating';
   else if (res.phase === 'reflection') phase = 'reflection';
 
+  const lastLearner =
+    [...res.dialogue_messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const lastAssistant =
+    [...res.dialogue_messages].reverse().find((m) => m.role === 'assistant')?.content?.trim() ||
+    null;
+  const lastAssistantFeedback = lastAssistant
+    ? stripProtocolTrailer(lastAssistant) || null
+    : null;
+
   const graded: GradeResult | null =
     res.phase === 'graded' || res.phase === 'reflection'
       ? {
@@ -205,11 +217,9 @@ function sessionFromResume(res: ResumeSessionResponse): SessionState {
           hedging_count: res.hedging_count ?? 0,
           flag_reason: res.flag_reason ?? null,
           assisted: res.assisted === true,
+          feedback: lastAssistantFeedback,
         }
       : null;
-
-  const lastLearner =
-    [...res.dialogue_messages].reverse().find((m) => m.role === 'user')?.content ?? '';
 
   const ratingContext =
     phase === 'rating' && currentQuestion
@@ -781,7 +791,7 @@ export function Study() {
         res.phase === 'skip_prompt' ||
         res.phase === 'reflection'
       ) {
-        const tutorText = res.tutor_message ?? '';
+        const tutorText = stripProtocolTrailer(res.tutor_message ?? '');
         beginTutorReveal(tutorText, () => {
           setSession((prev) => {
             if (!prev) return prev;
@@ -798,7 +808,7 @@ export function Study() {
       }
 
       if (res.phase === 'graded') {
-        const tutorText = res.tutor_message ?? '';
+        const tutorText = stripProtocolTrailer(res.tutor_message ?? '');
         const graded = gradeFromTurn(res);
         const enterRating = () => {
           setSession((prev) => {
@@ -874,7 +884,9 @@ export function Study() {
 
   const handleScratchpadAsk = useCallback(
     async (imageDataUri: string, prompt: string) => {
-      if (!session?.currentQuestion) return;
+      if (!session?.currentQuestion) {
+        throw new Error('No active question');
+      }
       setSubmitLoading(true);
       setSubmitError(null);
       const label = prompt.trim() || '[Scratchpad selection]';
@@ -898,12 +910,19 @@ export function Study() {
           learner_message: prompt.trim() || undefined,
         });
         handleTurnResponse(res, label);
+        return {
+          tutorMessage: stripProtocolTrailer(res.tutor_message ?? ''),
+          feedbackRegions: res.feedback_regions ?? [],
+        };
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : 'Failed to ask about selection');
+        const message =
+          err instanceof Error ? err.message : 'Failed to ask about selection';
+        setSubmitError(message);
         setSession((prev) => {
           if (!prev) return prev;
           return { ...prev, chatStatus: 'idle' };
         });
+        throw err instanceof Error ? err : new Error(message);
       } finally {
         setSubmitLoading(false);
       }
@@ -936,11 +955,14 @@ export function Study() {
         });
         handleTurnResponse(res, '[Scratchpad selection]');
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : 'Failed to submit selection');
+        const message =
+          err instanceof Error ? err.message : 'Failed to submit selection';
+        setSubmitError(message);
         setSession((prev) => {
           if (!prev) return prev;
           return { ...prev, chatStatus: 'idle' };
         });
+        throw err instanceof Error ? err : new Error(message);
       } finally {
         setSubmitLoading(false);
       }
@@ -949,7 +971,7 @@ export function Study() {
   );
 
   const handleSkip = useCallback(async () => {
-    if (!session?.currentQuestion) return;
+    if (!session?.currentQuestion || session.skipPrompt) return;
     setSubmitLoading(true);
     setSubmitError(null);
     setSession((prev) => {
@@ -970,6 +992,46 @@ export function Study() {
       setSubmitLoading(false);
     }
   }, [session, handleTurnResponse]);
+
+  const handleSkipReason = useCallback(
+    async (text: string) => {
+      if (!session?.currentQuestion || !session.skipPrompt) return;
+      const reason = text.trim();
+      if (!reason) return;
+
+      setSubmitLoading(true);
+      setSubmitError(null);
+
+      const userMsg: DialogueMessage = {
+        id: nextMessageId(),
+        role: 'user',
+        content: reason,
+      };
+
+      setSession((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          dialogueMessages: [...prev.dialogueMessages, userMsg],
+          chatStatus: 'generating',
+        };
+      });
+
+      try {
+        const res = await postTurn(session.sessionId, { skip_reason: reason });
+        handleTurnResponse(res, reason);
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : 'Failed to submit skip reason');
+        setSession((prev) => {
+          if (!prev) return prev;
+          return { ...prev, chatStatus: 'idle' };
+        });
+      } finally {
+        setSubmitLoading(false);
+      }
+    },
+    [session, handleTurnResponse],
+  );
 
   const finishQuestionAdvance = useCallback(
     async (
@@ -1504,8 +1566,11 @@ export function Study() {
                 onSubmitRating={handleSubmitRating}
                 onContinueToNext={handleContinueToNext}
                 onSkip={handleSkip}
+                skipPrompt={skipPrompt}
+                onSubmitSkipReason={handleSkipReason}
                 onRevealComplete={handleRevealComplete}
                 clearSceneToken={clearSceneToken}
+                submitError={submitError}
               />
             )}
             {questionLoading && (
@@ -1513,7 +1578,7 @@ export function Study() {
                 Generating next question…
               </p>
             )}
-            {submitError && (
+            {submitError && phase === 'dialogue' && (
               <p className="study-start__error scratchpad-workspace__toast" role="alert">
                 {submitError}
               </p>

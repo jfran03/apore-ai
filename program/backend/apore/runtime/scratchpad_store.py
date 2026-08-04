@@ -27,6 +27,7 @@ def write_scene(
     camera: dict[str, Any] | None = None,
     last_export_bounds: dict[str, Any] | None = None,
     feedback_regions: list[dict[str, Any]] | None = None,
+    annotations: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Persist a versioned Apore scratchpad document; returns its sidecar path."""
     path = scene_path(state_path, question_number)
@@ -41,6 +42,7 @@ def write_scene(
             dict(last_export_bounds) if last_export_bounds is not None else None
         ),
         "feedback_regions": list(feedback_regions or []),
+        "annotations": list(annotations or []),
     }
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -80,6 +82,11 @@ def read_scene(state_path: Path, question_number: int) -> dict[str, Any] | None:
         "feedback_regions": (
             list(data.get("feedback_regions") or [])
             if isinstance(data.get("feedback_regions"), list)
+            else []
+        ),
+        "annotations": (
+            list(data.get("annotations") or [])
+            if isinstance(data.get("annotations"), list)
             else []
         ),
     }

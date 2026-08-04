@@ -8,6 +8,8 @@ export interface GradeResult {
   hedging_count: number;
   flag_reason?: string | null;
   assisted?: boolean;
+  /** Tutor grade explanation shown after submit (Correct./Not quite. prose). */
+  feedback?: string | null;
 }
 
 interface SignalCaptureProps {

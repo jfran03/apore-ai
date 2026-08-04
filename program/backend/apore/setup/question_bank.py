@@ -123,7 +123,7 @@ def update_question(
     question_id: str,
     *,
     graph,
-    **fields: str | float,
+    **fields: str | float | bool,
 ) -> BankQuestion:
     bank = get_bank_for_chapter(chapter_root)
     for i, q in enumerate(bank.questions):
@@ -137,6 +137,9 @@ def update_question(
                 fields.get("intended_difficulty", q.intended_difficulty)
             ),
             text=str(fields.get("text", q.text)).strip(),
+            scratchpad_eligible=bool(
+                fields.get("scratchpad_eligible", q.scratchpad_eligible)
+            ),
         )
         bank.questions[i] = updated
         write_bank(chapter_root, bank, graph)
@@ -159,6 +162,8 @@ def _default_questions_for_concept(concept_id: str) -> list[BankQuestion]:
     out: list[BankQuestion] = []
     for qtype, (d1, d2) in _TYPE_DIFFICULTY.items():
         for idx, diff in enumerate((d1, d2), start=1):
+            # Apply/synthesis defaults are scratchpad-eligible; recall is not.
+            eligible = qtype in ("apply", "synthesis")
             out.append(
                 BankQuestion(
                     id=f"{concept_id}-{qtype}-{idx:02d}",
@@ -166,6 +171,7 @@ def _default_questions_for_concept(concept_id: str) -> list[BankQuestion]:
                     type=qtype,
                     intended_difficulty=diff,
                     text=f"[{qtype}] Question about {concept_id.replace('_', ' ')} ({idx}).",
+                    scratchpad_eligible=eligible,
                 )
             )
     return out
@@ -220,6 +226,7 @@ def _merge_question_batches(batches: list[list[BankQuestion]]) -> list[BankQuest
                     type=q.type,
                     intended_difficulty=q.intended_difficulty,
                     text=q.text,
+                    scratchpad_eligible=q.scratchpad_eligible,
                 )
             seen_ids.add(q.id)
             all_questions.append(q)
@@ -374,5 +381,6 @@ def entry_with_depth(entry: BankQuestion, graph) -> dict:
         "type": entry.type,
         "intended_difficulty": entry.intended_difficulty,
         "text": entry.text,
+        "scratchpad_eligible": entry.scratchpad_eligible,
         "depth": depth_for_question(entry, graph),
     }

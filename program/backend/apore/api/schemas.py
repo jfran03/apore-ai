@@ -256,6 +256,16 @@ ScratchpadNode = Annotated[
 ]
 
 
+class ScratchpadAnnotation(BaseModel):
+    """Persisted tutor reply anchored to selected scratchpad node IDs."""
+
+    id: str
+    node_ids: list[str] = Field(default_factory=list, min_length=1)
+    prompt: str = ""
+    response: str
+    feedback_regions: list[FeedbackRegion] = Field(default_factory=list)
+
+
 class ScratchpadScenePayload(BaseModel):
     """Versioned Apore scratchpad document for the active question."""
 
@@ -266,6 +276,10 @@ class ScratchpadScenePayload(BaseModel):
     camera: ScratchpadCamera = Field(default_factory=ScratchpadCamera)
     last_export_bounds: ScratchpadExportBounds | None = None
     feedback_regions: list[FeedbackRegion] = Field(default_factory=list)
+    annotations: list[ScratchpadAnnotation] = Field(
+        default_factory=list,
+        description="Completed Ask replies linked to canvas node IDs",
+    )
 
 
 class ScratchpadSceneResponse(BaseModel):
@@ -460,6 +474,7 @@ class QuestionBankEntry(BaseModel):
     type: str
     intended_difficulty: float = Field(ge=0.1, le=0.9)
     text: str
+    scratchpad_eligible: bool = False
 
 
 class QuestionBankEntryView(QuestionBankEntry):

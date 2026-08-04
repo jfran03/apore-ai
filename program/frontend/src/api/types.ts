@@ -94,6 +94,15 @@ export interface TurnResponse {
   feedback_regions?: FeedbackRegion[];
 }
 
+/** Persisted tutor reply anchored to selected scratchpad nodes. */
+export interface ScratchpadAnnotation {
+  id: string;
+  node_ids: string[];
+  prompt: string;
+  response: string;
+  feedback_regions: FeedbackRegion[];
+}
+
 export interface ScratchpadScenePayload {
   question_number: number;
   schema_version: 1;
@@ -102,6 +111,8 @@ export interface ScratchpadScenePayload {
   camera: ScratchpadCamera;
   last_export_bounds: ScratchpadExportBounds | null;
   feedback_regions: FeedbackRegion[];
+  /** Completed Ask replies linked to canvas nodes; empty on legacy scenes. */
+  annotations?: ScratchpadAnnotation[];
 }
 
 export interface ScratchpadCamera {
@@ -407,6 +418,7 @@ export interface QuestionBankEntry {
   type: string;
   intended_difficulty: number;
   text: string;
+  scratchpad_eligible: boolean;
   depth?: number;
 }
 

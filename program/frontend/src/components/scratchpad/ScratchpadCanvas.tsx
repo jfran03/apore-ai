@@ -48,6 +48,7 @@ interface ScratchpadCanvasProps {
   tool: ScratchpadTool;
   feedbackRegions: FeedbackRegion[];
   exportBounds: ScratchpadExportBounds | null;
+  annotationHighlights?: SceneRect[];
   disabled: boolean;
 }
 
@@ -217,6 +218,7 @@ export const ScratchpadCanvas = forwardRef<
     tool,
     feedbackRegions,
     exportBounds,
+    annotationHighlights = [],
     disabled,
   },
   ref,
@@ -227,11 +229,15 @@ export const ScratchpadCanvas = forwardRef<
   const panRef = useRef<{ pointer: Point; camera: ScratchpadCamera } | null>(null);
   const selectionStartRef = useRef<Point | null>(null);
   const pinchRef = useRef<{ distance: number; camera: ScratchpadCamera } | null>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textDraftRef = useRef<TextDraft | null>(null);
+  const textBlurArmedRef = useRef(false);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [draft, setDraft] = useState<ScratchpadNode | null>(null);
   const [selectionRect, setSelectionRect] = useState<SceneRect | null>(null);
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   const ink = cssColor('--color-ink', '#26251e');
+  textDraftRef.current = textDraft;
 
   useImperativeHandle(ref, () => ({
     focus: () => hostRef.current?.focus(),
@@ -260,6 +266,26 @@ export const ScratchpadCanvas = forwardRef<
     transformerRef.current?.nodes(selected);
     transformerRef.current?.getLayer()?.batchDraw();
   }, [history.present, history.selectedIds]);
+
+  useEffect(() => {
+    if (!textDraft) {
+      textBlurArmedRef.current = false;
+      return;
+    }
+    textBlurArmedRef.current = false;
+    const focusId = window.requestAnimationFrame(() => {
+      textAreaRef.current?.focus();
+    });
+    // Delay arming until the opening click fully settles; otherwise the same
+    // gesture blurs the empty overlay and discards it immediately.
+    const armTimer = window.setTimeout(() => {
+      textBlurArmedRef.current = true;
+    }, 100);
+    return () => {
+      window.cancelAnimationFrame(focusId);
+      window.clearTimeout(armTimer);
+    };
+  }, [textDraft?.id, textDraft?.x, textDraft?.y]);
 
   const pointerScene = useCallback(
     (stage: Konva.Stage): Point | null => {
@@ -325,6 +351,7 @@ export const ScratchpadCanvas = forwardRef<
         return;
       }
       if (tool === 'text') {
+        textBlurArmedRef.current = false;
         setTextDraft({ x: point.x, y: point.y, value: '' });
         return;
       }
@@ -487,14 +514,15 @@ export const ScratchpadCanvas = forwardRef<
               }}
               onSelect={selectNode}
               onErase={(id) => dispatch({ type: 'delete', ids: [id] })}
-              onEdit={(textNode) =>
+              onEdit={(textNode) => {
+                textBlurArmedRef.current = false;
                 setTextDraft({
                   id: textNode.id,
                   x: textNode.x,
                   y: textNode.y,
                   value: textNode.text,
-                })
-              }
+                });
+              }}
               onChange={(id, changes) => dispatch({ type: 'update', id, changes })}
             />
           ))}
@@ -532,6 +560,19 @@ export const ScratchpadCanvas = forwardRef<
           />
         </Layer>
         <Layer listening={false}>
+          {annotationHighlights.map((rect, index) => (
+            <Rect
+              key={`annotation-highlight-${index}-${rect.x}-${rect.y}`}
+              x={rect.x}
+              y={rect.y}
+              width={rect.width}
+              height={rect.height}
+              stroke="#807d72"
+              strokeWidth={1.5 / camera.scale}
+              dash={[5 / camera.scale, 4 / camera.scale]}
+              listening={false}
+            />
+          ))}
           {feedback.map((region) => (
             <Group key={`${region.index}-${region.label}`} x={region.x} y={region.y}>
               <Rect
@@ -585,9 +626,9 @@ export const ScratchpadCanvas = forwardRef<
       </div>
       {textDraft && (
         <textarea
+          ref={textAreaRef}
           className="scratchpad-canvas__text-editor"
           aria-label="Canvas text"
-          autoFocus
           value={textDraft.value}
           style={{
             left: textDraft.x * camera.scale + camera.x,
@@ -599,18 +640,29 @@ export const ScratchpadCanvas = forwardRef<
             )
           }
           onKeyDown={(event) => {
-            if (event.key === 'Escape') setTextDraft(null);
+            if (event.key === 'Escape') {
+              textBlurArmedRef.current = false;
+              textDraftRef.current = null;
+              setTextDraft(null);
+            }
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              textBlurArmedRef.current = true;
               event.currentTarget.blur();
             }
           }}
           onBlur={() => {
-            if (textDraft.value.trim()) {
-              if (textDraft.id) {
+            if (!textBlurArmedRef.current) {
+              window.requestAnimationFrame(() => textAreaRef.current?.focus());
+              return;
+            }
+            const draftValue = textDraftRef.current;
+            if (!draftValue) return;
+            if (draftValue.value.trim()) {
+              if (draftValue.id) {
                 dispatch({
                   type: 'update',
-                  id: textDraft.id,
-                  changes: { text: textDraft.value.trim() },
+                  id: draftValue.id,
+                  changes: { text: draftValue.value.trim() },
                 });
               } else {
                 dispatch({
@@ -618,9 +670,9 @@ export const ScratchpadCanvas = forwardRef<
                   node: {
                     id: nextNodeId(),
                     type: 'text',
-                    x: textDraft.x,
-                    y: textDraft.y,
-                    text: textDraft.value.trim(),
+                    x: draftValue.x,
+                    y: draftValue.y,
+                    text: draftValue.value.trim(),
                     fill: ink,
                     font_size: 20,
                     width: 220,

@@ -1762,8 +1762,17 @@ button.study-mode-card {
   background: var(--color-hairline);
 }
 
-.scratchpad-selection-action {
+.scratchpad-selection-actions {
   position: absolute;
+  z-index: 36;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(420px, calc(100% - 24px));
+}
+
+.scratchpad-selection-action {
+  position: relative;
   z-index: 36;
   min-height: 40px;
   padding: 0 var(--spacing-sm);
@@ -1773,6 +1782,12 @@ button.study-mode-card {
   color: var(--color-ink);
   font: var(--font-size-caption)/1 var(--font-sans);
   cursor: pointer;
+}
+
+.scratchpad-selection-action--submit {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
 }
 
 .scratchpad-selection-action kbd {
@@ -1860,12 +1875,232 @@ button.study-mode-card {
   background: var(--color-surface-card);
 }
 
+.scratchpad-annotation-marker {
+  position: absolute;
+  z-index: 37;
+  min-height: 36px;
+  min-width: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-card);
+  color: var(--color-ink);
+  font: var(--font-size-caption)/1 var(--font-sans);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+
+.scratchpad-annotation-marker:hover,
+.scratchpad-annotation-marker:focus-visible {
+  border-color: var(--color-ink);
+  outline: none;
+}
+
+.scratchpad-annotation-panel {
+  position: absolute;
+  z-index: 38;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  width: min(360px, calc(100% - 24px));
+  max-width: min(360px, calc(100% - 24px));
+  padding: var(--spacing-sm);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-card);
+}
+
+.scratchpad-annotation-panel--loading,
+.scratchpad-annotation-panel--error,
+.scratchpad-annotation-panel--response {
+  min-height: 96px;
+}
+
+.scratchpad-annotation-panel__label {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.scratchpad-annotation-panel__dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.scratchpad-annotation-panel__dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--color-timeline-thinking);
+  animation: tutor-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.scratchpad-annotation-panel__dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.scratchpad-annotation-panel__dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.scratchpad-annotation-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-xs);
+  min-height: 36px;
+}
+
+.scratchpad-annotation-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.scratchpad-annotation-panel__prompt {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.scratchpad-annotation-panel__verdict {
+  margin: 0;
+}
+
+.scratchpad-annotation-panel__thinking {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-body);
+  line-height: 1.5;
+}
+
+.scratchpad-annotation-panel__response {
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-ink);
+  line-height: 1.55;
+}
+
+.scratchpad-annotation-panel__markdown.md {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-ink);
+  line-height: 1.55;
+}
+
+.scratchpad-annotation-panel__markdown.md p {
+  margin: 0 0 var(--spacing-xs);
+}
+
+.scratchpad-annotation-panel__markdown.md > :last-child {
+  margin-bottom: 0;
+}
+
+.scratchpad-annotation-panel__markdown.md ul,
+.scratchpad-annotation-panel__markdown.md ol {
+  margin: 0 0 var(--spacing-xs);
+  padding-left: 1.25em;
+}
+
+.scratchpad-annotation-panel__markdown.md code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  background: var(--color-canvas-soft);
+}
+
+.scratchpad-annotation-panel__markdown.md pre {
+  margin: 0 0 var(--spacing-xs);
+  padding: var(--spacing-xs);
+  overflow-x: auto;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas-soft);
+}
+
+.scratchpad-annotation-panel__markdown.md pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.scratchpad-annotation-panel__error {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-semantic-error);
+  line-height: 1.45;
+}
+
+.scratchpad-annotation-panel__confirm-prompt {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.scratchpad-annotation-panel__cancel,
+.scratchpad-annotation-panel__dismiss,
+.scratchpad-annotation-panel__retry {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-body);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
+.scratchpad-annotation-panel__retry {
+  border-color: var(--color-hairline-strong);
+  color: var(--color-ink);
+}
+
+.scratchpad-annotation-panel__cancel:hover,
+.scratchpad-annotation-panel__dismiss:hover,
+.scratchpad-annotation-panel__retry:hover,
+.scratchpad-annotation-panel__cancel:focus-visible,
+.scratchpad-annotation-panel__dismiss:focus-visible,
+.scratchpad-annotation-panel__retry:focus-visible {
+  border-color: var(--color-ink);
+  color: var(--color-ink);
+  outline: none;
+}
+
+.scratchpad-annotation-panel__cancel:disabled,
+.scratchpad-annotation-panel__dismiss:disabled,
+.scratchpad-annotation-panel__retry:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 959px) {
+  .scratchpad-annotation-panel {
+    width: min(360px, calc(100% - 24px));
+    max-width: min(360px, calc(100% - 24px));
+  }
+
+  .scratchpad-annotation-marker {
+    width: fit-content;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scratchpad-annotation-panel__dots span {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 @media (max-width: 959px) {
   .scratchpad-prompt-bar {
-    left: 12px !important;
-    right: 12px;
-    max-width: none;
-    width: auto;
+    max-width: min(520px, calc(100% - 24px));
   }
 
   .scratchpad-toolbar {
@@ -1980,10 +2215,77 @@ button.study-mode-card {
 
 .scratchpad-prompt-bar__chip:disabled,
 .scratchpad-prompt-bar__send:disabled,
-.scratchpad-prompt-bar__submit:disabled,
 .scratchpad-prompt-bar__input:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.scratchpad-submit-confirm {
+  position: absolute;
+  z-index: 38;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  width: min(360px, calc(100% - 24px));
+  padding: var(--spacing-sm);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-card);
+}
+
+.scratchpad-submit-confirm__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scratchpad-submit-confirm__title {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: var(--font-size-title-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.scratchpad-submit-confirm__meta {
+  margin: 0;
+  color: var(--color-body);
+  font-size: var(--font-size-caption);
+}
+
+.scratchpad-submit-confirm__preview {
+  overflow: hidden;
+  max-height: 140px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  background: var(--color-canvas-soft);
+}
+
+.scratchpad-submit-confirm__preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 140px;
+  object-fit: contain;
+}
+
+.scratchpad-submit-confirm__status,
+.scratchpad-submit-confirm__error {
+  margin: 0;
+  font-size: var(--font-size-caption);
+}
+
+.scratchpad-submit-confirm__status {
+  color: var(--color-body);
+}
+
+.scratchpad-submit-confirm__error {
+  color: var(--color-semantic-error);
+}
+
+.scratchpad-submit-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-xs);
 }
 
 /* Right meta drawer panel (toggle lives in toolbar) */
@@ -2075,6 +2377,50 @@ button.study-mode-card {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
+}
+
+.scratchpad-tutor-strip__skip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.scratchpad-skip-reason {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.scratchpad-skip-reason__input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--spacing-sm);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-card);
+  color: var(--color-ink);
+  font: var(--font-size-body-sm)/1.4 var(--font-sans);
+}
+
+.scratchpad-skip-reason__input::placeholder {
+  color: var(--color-muted);
+}
+
+.scratchpad-skip-reason__input:focus-visible {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+.scratchpad-skip-reason__input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.scratchpad-skip-reason__submit {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1534,6 +1534,7 @@ def post_question(session_id: str, body: QuestionRequest) -> QuestionResponse:
             focus_mode=sess.focus_mode,
             last_concept_id=sess.active_concept_id,
             allowed_concept_ids=allowed,
+            study_mode=sess.study_mode,
         )
     except QuestionBankExhaustedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -2135,6 +2136,7 @@ def put_scratchpad_scene(
             else None
         ),
         feedback_regions=[region.model_dump() for region in body.feedback_regions],
+        annotations=[annotation.model_dump() for annotation in body.annotations],
     )
     return ScratchpadSceneResponse(question_number=body.question_number, scene=body)
 
@@ -2781,6 +2783,7 @@ def put_domain_question_bank(
                 type=q.type.lower(),
                 intended_difficulty=q.intended_difficulty,
                 text=q.text.strip(),
+                scratchpad_eligible=q.scratchpad_eligible,
             )
             for q in body.questions
         ],
@@ -2809,6 +2812,7 @@ def post_domain_question(
         type=body.type.lower(),
         intended_difficulty=body.intended_difficulty,
         text=body.text.strip(),
+        scratchpad_eligible=body.scratchpad_eligible,
     )
     try:
         add_question(root, entry, graph=graph)
@@ -2838,6 +2842,7 @@ def patch_domain_question(
             type=body.type.lower(),
             intended_difficulty=body.intended_difficulty,
             text=body.text.strip(),
+            scratchpad_eligible=body.scratchpad_eligible,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -2908,6 +2913,7 @@ def put_fixture_question_bank(
                 type=q.type.lower(),
                 intended_difficulty=q.intended_difficulty,
                 text=q.text.strip(),
+                scratchpad_eligible=q.scratchpad_eligible,
             )
             for q in body.questions
         ],
@@ -2932,6 +2938,7 @@ def post_fixture_question(name: str, body: QuestionBankEntry) -> QuestionBankRes
         type=body.type.lower(),
         intended_difficulty=body.intended_difficulty,
         text=body.text.strip(),
+        scratchpad_eligible=body.scratchpad_eligible,
     )
     try:
         add_question(root, entry, graph=graph)
@@ -2958,6 +2965,7 @@ def patch_fixture_question(
             type=body.type.lower(),
             intended_difficulty=body.intended_difficulty,
             text=body.text.strip(),
+            scratchpad_eligible=body.scratchpad_eligible,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

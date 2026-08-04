@@ -11,6 +11,7 @@ import {
 } from 'react';
 import type {
   FeedbackRegion,
+  ScratchpadAnnotation,
   ScratchpadCamera,
   ScratchpadExportBounds,
   ScratchpadScenePayload,
@@ -18,7 +19,8 @@ import type {
 import { putScratchpadScene } from '../../api/client';
 import type { GradeResult } from '../SignalCapture';
 import type { ChatStatus } from '../TutorChatCard';
-import { ScratchpadPromptBar, type PromptBarPosition } from './ScratchpadPromptBar';
+import { ScratchpadAnnotationPanel } from './ScratchpadAnnotationPanel';
+import { ScratchpadPromptBar, type PromptBarMode, type PromptBarPosition } from './ScratchpadPromptBar';
 import {
   ScratchpadQuestionPanel,
   SCRATCHPAD_TOOLBAR_HEIGHT,
@@ -28,8 +30,10 @@ import { exportKonvaSelection } from './scratchpadKonva';
 import {
   createHistory,
   historyReducer,
+  nodeBounds,
   sceneToScreen,
   selectedExportBounds,
+  type SceneRect,
   type ScratchpadTool,
 } from './scratchpadModel';
 
@@ -39,10 +43,31 @@ const ScratchpadCanvas = lazy(async () => {
 });
 
 const DEFAULT_CAMERA: ScratchpadCamera = { x: 0, y: 0, scale: 1 };
-const PROMPT_WIDTH = 420;
-const PROMPT_HEIGHT = 52;
+const ANCHOR_WIDTH = 420;
+const ANCHOR_HEIGHT = 52;
+const SUBMIT_CONFIRM_WIDTH = 360;
+const SUBMIT_CONFIRM_HEIGHT = 280;
+const RESPONSE_PANEL_WIDTH = 360;
+const RESPONSE_PANEL_HEIGHT = 180;
+const MARKER_WIDTH = 88;
+const MARKER_HEIGHT = 36;
 const BOTTOM_SAFE = 120;
 const QUESTION_PREVIEW_ID = 'scratchpad-question-preview';
+const EMPTY_REPLY = 'No reply was returned for this selection.';
+
+export interface ScratchpadAskResult {
+  tutorMessage: string;
+  feedbackRegions: FeedbackRegion[];
+}
+
+interface ActiveAskRequest {
+  id: string;
+  nodeIds: string[];
+  imageDataUri: string;
+  prompt: string;
+  error: string | null;
+  position: PromptBarPosition;
+}
 
 interface ScratchpadWorkspaceProps {
   sessionId: string;
@@ -62,13 +87,19 @@ interface ScratchpadWorkspaceProps {
   metaOpen: boolean;
   onMetaOpenChange: (open: boolean) => void;
   onExitSession: () => void;
-  onAskSelection: (imageDataUri: string, prompt: string) => void | Promise<void>;
+  onAskSelection: (
+    imageDataUri: string,
+    prompt: string,
+  ) => ScratchpadAskResult | Promise<ScratchpadAskResult>;
   onSubmitSelection: (imageDataUri: string) => void | Promise<void>;
   onSubmitRating: (rating: 'easy' | 'ok' | 'hard') => void | Promise<void>;
   onContinueToNext: () => void | Promise<void>;
   onSkip: () => void | Promise<void>;
+  skipPrompt?: boolean;
+  onSubmitSkipReason?: (reason: string) => void | Promise<void>;
   onRevealComplete: () => void;
   clearSceneToken: number;
+  submitError?: string | null;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -85,33 +116,57 @@ function cssColor(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
-function promptPosition(
+function nextAnnotationId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `ann-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+/** Shared top-right selection anchor for action chip, composer, and replies. */
+export function selectionAnchorPosition(
   host: HTMLElement | null,
-  bounds: ScratchpadExportBounds,
+  bounds: ScratchpadExportBounds | SceneRect,
   camera: ScratchpadCamera,
   metaOpen: boolean,
   narrow: boolean,
+  panelWidth = ANCHOR_WIDTH,
+  panelHeight = ANCHOR_HEIGHT,
 ): PromptBarPosition {
-  const width = host?.clientWidth ?? 640;
-  const height = host?.clientHeight ?? 480;
-  if (narrow) {
-    return {
-      left: 12,
-      top: Math.max(SCRATCHPAD_TOOLBAR_HEIGHT + 8, height - BOTTOM_SAFE - PROMPT_HEIGHT),
-    };
-  }
+  const width = host && host.clientWidth > 0 ? host.clientWidth : 640;
+  const height = host && host.clientHeight > 0 ? host.clientHeight : 480;
   const screen = sceneToScreen(
-    { x: bounds.x + bounds.width, y: bounds.y + bounds.height / 2 },
+    { x: bounds.x + bounds.width, y: bounds.y },
     camera,
   );
-  const rightReserve = metaOpen ? 296 : 16;
+  const gutter = narrow ? 12 : 64;
+  const rightReserve = metaOpen ? (narrow ? 12 : 296) : 16;
+  const maxLeft = Math.max(gutter, width - rightReserve - panelWidth);
+  const minTop = SCRATCHPAD_TOOLBAR_HEIGHT + 8;
+  const maxTop = Math.max(minTop, height - BOTTOM_SAFE - panelHeight);
   return {
-    left: Math.min(Math.max(64, screen.x + 12), Math.max(64, width - rightReserve - PROMPT_WIDTH)),
-    top: Math.min(
-      Math.max(SCRATCHPAD_TOOLBAR_HEIGHT + 8, screen.y - PROMPT_HEIGHT / 2),
-      Math.max(SCRATCHPAD_TOOLBAR_HEIGHT + 8, height - BOTTOM_SAFE - PROMPT_HEIGHT),
-    ),
+    left: Math.min(Math.max(gutter, screen.x + 12), maxLeft),
+    top: Math.min(Math.max(minTop, screen.y), maxTop),
   };
+}
+
+function pruneAnnotations(
+  annotations: ScratchpadAnnotation[],
+  presentIds: Set<string>,
+): ScratchpadAnnotation[] {
+  return annotations
+    .map((annotation) => ({
+      ...annotation,
+      node_ids: annotation.node_ids.filter((id) => presentIds.has(id)),
+    }))
+    .filter((annotation) => annotation.node_ids.length > 0);
+}
+
+function highlightRectsForIds(
+  nodes: ScratchpadScenePayload['nodes'],
+  nodeIds: string[],
+): SceneRect[] {
+  const selected = new Set(nodeIds);
+  return nodes.filter((node) => selected.has(node.id)).map(nodeBounds);
 }
 
 const toolItems: Array<{ tool: ScratchpadTool; label: string; shortcut: string }> = [
@@ -207,8 +262,11 @@ export function ScratchpadWorkspace({
   onSubmitRating,
   onContinueToNext,
   onSkip,
+  skipPrompt = false,
+  onSubmitSkipReason,
   onRevealComplete,
   clearSceneToken,
+  submitError = null,
 }: ScratchpadWorkspaceProps) {
   const initialNodes =
     initialScene?.question_number === questionNumber ? initialScene.nodes : [];
@@ -228,19 +286,32 @@ export function ScratchpadWorkspace({
       ? initialScene.feedback_regions
       : feedbackRegions,
   );
+  const [annotations, setAnnotations] = useState<ScratchpadAnnotation[]>(
+    initialScene?.question_number === questionNumber
+      ? initialScene.annotations ?? []
+      : [],
+  );
+  const [expandedAnnotationId, setExpandedAnnotationId] = useState<string | null>(null);
+  const [activeAsk, setActiveAsk] = useState<ActiveAskRequest | null>(null);
   const [tool, setTool] = useState<ScratchpadTool>('pen');
   const [spacePan, setSpacePan] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
+  const [promptMode, setPromptMode] = useState<PromptBarMode>('ask');
   const [askPrompt, setAskPrompt] = useState('');
+  const [skipReason, setSkipReason] = useState('');
   const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [pendingNodeIds, setPendingNodeIds] = useState<string[]>([]);
+  const [submittedNodeIds, setSubmittedNodeIds] = useState<string[]>([]);
+  const [gradeExpanded, setGradeExpanded] = useState(true);
   const [selectionHint, setSelectionHint] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [localSubmitError, setLocalSubmitError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [selectionCount, setSelectionCount] = useState(0);
   const [questionHovered, setQuestionHovered] = useState(false);
   const [questionFocused, setQuestionFocused] = useState(false);
-  const [questionClickMode, setQuestionClickMode] = useState(false);
-  const [questionClickOpen, setQuestionClickOpen] = useState(false);
+  const [questionClickMode, setQuestionClickMode] = useState(true);
+  const [questionClickOpen, setQuestionClickOpen] = useState(true);
   const [themeRevision, setThemeRevision] = useState(0);
   const [narrow, setNarrow] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -259,6 +330,7 @@ export function ScratchpadWorkspace({
   const latestPayloadRef = useRef<ScratchpadScenePayload | null>(null);
   const lastClearTokenRef = useRef(clearSceneToken);
   const busy = disabled || chatStatus !== 'idle';
+  const asking = activeAsk !== null && activeAsk.error === null;
   const questionPreviewOpen = questionClickMode
     ? questionClickOpen
     : questionHovered || questionFocused;
@@ -271,8 +343,16 @@ export function ScratchpadWorkspace({
       camera,
       last_export_bounds: exportBounds,
       feedback_regions: boundFeedbackRegions,
+      annotations,
     }),
-    [boundFeedbackRegions, camera, exportBounds, history.present, questionNumber],
+    [
+      annotations,
+      boundFeedbackRegions,
+      camera,
+      exportBounds,
+      history.present,
+      questionNumber,
+    ],
   );
   latestPayloadRef.current = scenePayload;
 
@@ -334,9 +414,14 @@ export function ScratchpadWorkspace({
   useEffect(() => {
     setQuestionHovered(false);
     setQuestionFocused(false);
-    setQuestionClickMode(false);
-    setQuestionClickOpen(false);
+    setQuestionClickMode(true);
+    setQuestionClickOpen(true);
+    setSkipReason('');
   }, [questionNumber]);
+
+  useEffect(() => {
+    if (!skipPrompt) setSkipReason('');
+  }, [skipPrompt]);
 
   useEffect(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -365,9 +450,17 @@ export function ScratchpadWorkspace({
     setCamera(DEFAULT_CAMERA);
     setExportBounds(null);
     setBoundFeedbackRegions([]);
+    setAnnotations([]);
+    setExpandedAnnotationId(null);
+    setActiveAsk(null);
     setPromptOpen(false);
+    setPromptMode('ask');
     setPendingImage(null);
+    setPendingNodeIds([]);
+    setSubmittedNodeIds([]);
+    setGradeExpanded(true);
     setSelectionHint(null);
+    setLocalSubmitError(null);
     lastSavedRef.current = '';
   }, [clearSceneToken]);
 
@@ -377,23 +470,68 @@ export function ScratchpadWorkspace({
     setCamera(initialScene.camera);
     setExportBounds(initialScene.last_export_bounds);
     setBoundFeedbackRegions(initialScene.feedback_regions);
-    lastSavedRef.current = JSON.stringify(initialScene);
+    setAnnotations(initialScene.annotations ?? []);
+    setExpandedAnnotationId(null);
+    setActiveAsk(null);
+    lastSavedRef.current = JSON.stringify({
+      ...initialScene,
+      annotations: initialScene.annotations ?? [],
+    });
   }, [initialScene, questionNumber]);
 
   useEffect(() => {
     setBoundFeedbackRegions(feedbackRegions);
   }, [feedbackRegions]);
 
-  const closePrompt = useCallback(() => {
-    setPromptOpen(false);
-    setAskPrompt('');
-  }, []);
+  useEffect(() => {
+    const presentIds = new Set(history.present.map((node) => node.id));
+    setAnnotations((current) => {
+      const next = pruneAnnotations(current, presentIds);
+      return next.length === current.length &&
+        next.every(
+          (annotation, index) =>
+            annotation.id === current[index]?.id &&
+            annotation.node_ids.length === current[index]?.node_ids.length &&
+            annotation.node_ids.every((id, i) => id === current[index]?.node_ids[i]),
+        )
+        ? current
+        : next;
+    });
+    setActiveAsk((current) => {
+      if (!current) return current;
+      const nodeIds = current.nodeIds.filter((id) => presentIds.has(id));
+      if (nodeIds.length === 0) return null;
+      if (nodeIds.length === current.nodeIds.length) return current;
+      return { ...current, nodeIds };
+    });
+    setSubmittedNodeIds((current) => {
+      if (current.length === 0) return current;
+      const next = current.filter((id) => presentIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [history.present]);
 
-  const openPrompt = useCallback(() => {
-    if (busy || phase !== 'dialogue') return;
+  useEffect(() => {
+    setExpandedAnnotationId((current) => {
+      if (!current) return current;
+      return annotations.some((annotation) => annotation.id === current) ? current : null;
+    });
+  }, [annotations]);
+
+  const closePrompt = useCallback(() => {
+    if (promptMode === 'submitting') return;
+    setPromptOpen(false);
+    setPromptMode('ask');
+    setAskPrompt('');
+    setPendingNodeIds([]);
+    setLocalSubmitError(null);
+  }, [promptMode]);
+
+  const prepareSelectionExport = useCallback(() => {
+    if (busy || asking || phase !== 'dialogue' || skipPrompt) return null;
     if (history.selectedIds.length === 0) {
-      setSelectionHint('Select the work you want to send, then press /.');
-      return;
+      setSelectionHint('Select the work you want to send, then choose Ask or Submit.');
+      return null;
     }
     setSelectionHint(null);
     setExportError(null);
@@ -403,17 +541,64 @@ export function ScratchpadWorkspace({
         history.selectedIds,
         cssColor('--color-canvas-soft', '#f3f2ec'),
       );
-      if (!result) return;
+      if (!result) return null;
       setPendingImage(result.imageDataUri);
+      setPendingNodeIds([...history.selectedIds]);
       setBoundFeedbackRegions([]);
       setExportBounds(result.bounds);
       setSelectionCount(history.selectedIds.length);
-      setPosition(promptPosition(hostRef.current, result.bounds, camera, metaOpen, narrow));
-      setPromptOpen(true);
+      setExpandedAnnotationId(null);
+      setLocalSubmitError(null);
+      return result;
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'Failed to export selection');
+      return null;
     }
-  }, [busy, camera, history.present, history.selectedIds, metaOpen, narrow, phase]);
+  }, [asking, busy, history.present, history.selectedIds, phase, skipPrompt]);
+
+  useEffect(() => {
+    if (!skipPrompt) return;
+    setPromptOpen(false);
+    setPromptMode('ask');
+    setAskPrompt('');
+    setPendingNodeIds([]);
+    setLocalSubmitError(null);
+    setActiveAsk(null);
+  }, [skipPrompt]);
+
+  const openAsk = useCallback(() => {
+    const result = prepareSelectionExport();
+    if (!result) return;
+    const anchorBounds =
+      selectedExportBounds(history.present, history.selectedIds, 0) ?? result.bounds;
+    setPosition(
+      selectionAnchorPosition(hostRef.current, anchorBounds, camera, metaOpen, narrow),
+    );
+    setPromptMode('ask');
+    setPromptOpen(true);
+  }, [camera, history.present, history.selectedIds, metaOpen, narrow, prepareSelectionExport]);
+
+  const openSubmit = useCallback(() => {
+    const result = prepareSelectionExport();
+    if (!result) return;
+    const anchorBounds =
+      selectedExportBounds(history.present, history.selectedIds, 0) ?? result.bounds;
+    setPosition(
+      selectionAnchorPosition(
+        hostRef.current,
+        anchorBounds,
+        camera,
+        metaOpen,
+        narrow,
+        SUBMIT_CONFIRM_WIDTH,
+        SUBMIT_CONFIRM_HEIGHT,
+      ),
+    );
+    setPromptMode('submit');
+    setPromptOpen(true);
+  }, [camera, history.present, history.selectedIds, metaOpen, narrow, prepareSelectionExport]);
+
+  const openPrompt = openAsk;
 
   useEffect(() => {
     function keyDown(event: KeyboardEvent) {
@@ -468,40 +653,255 @@ export function ScratchpadWorkspace({
     };
   }, [history.selectedIds, openPrompt]);
 
-  useEffect(() => {
-    if (!promptOpen || !exportBounds) return;
-    setPosition(promptPosition(hostRef.current, exportBounds, camera, metaOpen, narrow));
-  }, [camera, exportBounds, metaOpen, narrow, promptOpen]);
-
-  const handleAsk = useCallback(async () => {
-    if (!pendingImage) return;
-    if (!(await flushLatest())) return;
-    setPromptOpen(false);
-    await onAskSelection(pendingImage, askPrompt.trim());
-    setAskPrompt('');
-  }, [askPrompt, flushLatest, onAskSelection, pendingImage]);
-
-  const handleSubmit = useCallback(async () => {
-    if (!pendingImage) return;
-    if (!(await flushLatest())) return;
-    setPromptOpen(false);
-    await onSubmitSelection(pendingImage);
-    setAskPrompt('');
-  }, [flushLatest, onSubmitSelection, pendingImage]);
+  const selectionBounds = useMemo(
+    () => selectedExportBounds(history.present, history.selectedIds, 0),
+    [history.present, history.selectedIds],
+  );
 
   const selectionActionPosition = useMemo(() => {
-    const bounds = selectedExportBounds(history.present, history.selectedIds, 0);
-    if (!bounds) return undefined;
-    const point = sceneToScreen(
-      { x: bounds.x + bounds.width, y: bounds.y },
+    if (!selectionBounds) return undefined;
+    return selectionAnchorPosition(
+      hostRef.current,
+      selectionBounds,
       camera,
+      metaOpen,
+      narrow,
     );
-    return {
-      left: Math.max(64, Math.min(point.x + 12, (hostRef.current?.clientWidth ?? 800) - 220)),
-      top: Math.max(SCRATCHPAD_TOOLBAR_HEIGHT + 8, point.y),
+  }, [camera, metaOpen, narrow, selectionBounds]);
+
+  useEffect(() => {
+    if (!promptOpen) return;
+    const bounds =
+      selectedExportBounds(history.present, pendingNodeIds, 0) ?? exportBounds;
+    if (!bounds) return;
+    const panelWidth = promptMode === 'ask' ? ANCHOR_WIDTH : SUBMIT_CONFIRM_WIDTH;
+    const panelHeight = promptMode === 'ask' ? ANCHOR_HEIGHT : SUBMIT_CONFIRM_HEIGHT;
+    setPosition(
+      selectionAnchorPosition(
+        hostRef.current,
+        bounds,
+        camera,
+        metaOpen,
+        narrow,
+        panelWidth,
+        panelHeight,
+      ),
+    );
+  }, [
+    camera,
+    exportBounds,
+    history.present,
+    metaOpen,
+    narrow,
+    pendingNodeIds,
+    promptMode,
+    promptOpen,
+  ]);
+
+  useEffect(() => {
+    if (promptMode === 'submitting' || promptMode === 'submit-error') {
+      if (submitError) {
+        setLocalSubmitError(submitError);
+        setPromptMode('submit-error');
+        setPromptOpen(true);
+        return;
+      }
+      if (phase === 'rating' || phase === 'reflection') {
+        setPromptOpen(false);
+        setPromptMode('ask');
+        setPendingImage(null);
+        setPendingNodeIds([]);
+        setLocalSubmitError(null);
+        setGradeExpanded(true);
+      }
+    }
+  }, [phase, promptMode, submitError]);
+
+  useEffect(() => {
+    if ((phase === 'rating' || phase === 'reflection') && graded) {
+      setGradeExpanded(true);
+    }
+  }, [graded, phase]);
+
+  const runAsk = useCallback(
+    async (request: ActiveAskRequest) => {
+      setActiveAsk({ ...request, error: null });
+      setExpandedAnnotationId(null);
+      try {
+        const result = await onAskSelection(request.imageDataUri, request.prompt);
+        const annotation: ScratchpadAnnotation = {
+          id: request.id,
+          node_ids: request.nodeIds,
+          prompt: request.prompt,
+          response: result.tutorMessage.trim() || EMPTY_REPLY,
+          feedback_regions: result.feedbackRegions,
+        };
+        setAnnotations((current) => [
+          ...current.filter((item) => item.id !== annotation.id),
+          annotation,
+        ]);
+        setBoundFeedbackRegions(result.feedbackRegions);
+        setActiveAsk(null);
+        setExpandedAnnotationId(annotation.id);
+      } catch (error) {
+        setActiveAsk({
+          ...request,
+          error: error instanceof Error ? error.message : 'Failed to ask about selection',
+        });
+      }
+    },
+    [onAskSelection],
+  );
+
+  const handleAsk = useCallback(async () => {
+    if (!pendingImage || pendingNodeIds.length === 0) return;
+    if (!(await flushLatest())) return;
+    const bounds =
+      selectedExportBounds(history.present, pendingNodeIds, 0) ?? exportBounds;
+    if (!bounds) return;
+    const request: ActiveAskRequest = {
+      id: nextAnnotationId(),
+      nodeIds: pendingNodeIds,
+      imageDataUri: pendingImage,
+      prompt: askPrompt.trim(),
+      error: null,
+      position: selectionAnchorPosition(
+        hostRef.current,
+        bounds,
+        camera,
+        metaOpen,
+        narrow,
+        RESPONSE_PANEL_WIDTH,
+        RESPONSE_PANEL_HEIGHT,
+      ),
     };
-  }, [camera, history.present, history.selectedIds]);
+    setPromptOpen(false);
+    setAskPrompt('');
+    setPendingImage(null);
+    setPendingNodeIds([]);
+    await runAsk(request);
+  }, [
+    askPrompt,
+    camera,
+    exportBounds,
+    flushLatest,
+    history.present,
+    metaOpen,
+    narrow,
+    pendingImage,
+    pendingNodeIds,
+    runAsk,
+  ]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!pendingImage || pendingNodeIds.length === 0) return;
+    const nodeIds = [...pendingNodeIds];
+    setSubmittedNodeIds(nodeIds);
+    setGradeExpanded(true);
+    setPromptMode('submitting');
+    setLocalSubmitError(null);
+    // Close confirm and show Ask-like loading panel on the selection.
+    setPromptOpen(false);
+    if (!(await flushLatest())) {
+      setLocalSubmitError('Canvas could not be saved. Retry when ready.');
+      setPromptMode('submit-error');
+      setPromptOpen(true);
+      return;
+    }
+    try {
+      await onSubmitSelection(pendingImage);
+      // Grade reply opens when phase becomes rating/reflection.
+    } catch (error) {
+      setLocalSubmitError(
+        error instanceof Error ? error.message : 'Failed to submit selected answer',
+      );
+      setPromptMode('submit-error');
+      setPromptOpen(true);
+    }
+  }, [flushLatest, onSubmitSelection, pendingImage, pendingNodeIds]);
+
+  const handleRetrySubmit = useCallback(() => {
+    void handleSubmit();
+  }, [handleSubmit]);
+
+  const gradeAnchorBounds = useMemo(() => {
+    if (submittedNodeIds.length > 0) {
+      return selectedExportBounds(history.present, submittedNodeIds, 0) ?? exportBounds;
+    }
+    return exportBounds;
+  }, [exportBounds, history.present, submittedNodeIds]);
+
+  const gradePanelPosition = useMemo(() => {
+    if (!gradeAnchorBounds) return null;
+    return selectionAnchorPosition(
+      hostRef.current,
+      gradeAnchorBounds,
+      camera,
+      metaOpen,
+      narrow,
+      gradeExpanded ? RESPONSE_PANEL_WIDTH : MARKER_WIDTH,
+      gradeExpanded ? RESPONSE_PANEL_HEIGHT : MARKER_HEIGHT,
+    );
+  }, [camera, gradeAnchorBounds, gradeExpanded, metaOpen, narrow]);
+
+  const gradingInFlight =
+    promptMode === 'submitting' &&
+    phase === 'dialogue' &&
+    submittedNodeIds.length > 0 &&
+    gradePanelPosition !== null;
+
+  const showGradeReply =
+    (phase === 'rating' || phase === 'reflection') &&
+    graded !== null &&
+    gradePanelPosition !== null;
+
+  const annotationHighlights = useMemo(() => {
+    const rects: SceneRect[] = [];
+    for (const annotation of annotations) {
+      rects.push(...highlightRectsForIds(history.present, annotation.node_ids));
+    }
+    if (activeAsk) {
+      rects.push(...highlightRectsForIds(history.present, activeAsk.nodeIds));
+    }
+    if (promptOpen && pendingNodeIds.length > 0) {
+      rects.push(...highlightRectsForIds(history.present, pendingNodeIds));
+    }
+    if (submittedNodeIds.length > 0 && (gradingInFlight || showGradeReply)) {
+      rects.push(...highlightRectsForIds(history.present, submittedNodeIds));
+    }
+    return rects;
+  }, [
+    activeAsk,
+    annotations,
+    gradingInFlight,
+    history.present,
+    pendingNodeIds,
+    promptOpen,
+    showGradeReply,
+    submittedNodeIds,
+  ]);
+
   const showOutcome = phase === 'rating' || phase === 'reflection';
+  const showSkipPrompt = skipPrompt && phase === 'dialogue';
+  const showSelectionAction =
+    history.selectedIds.length > 0 &&
+    phase === 'dialogue' &&
+    !skipPrompt &&
+    !promptOpen &&
+    !activeAsk &&
+    !gradingInFlight;
+  const displaySubmitError = localSubmitError ?? submitError;
+  const canSubmitSkipReason =
+    !busy && showSkipPrompt && skipReason.trim().length > 0 && Boolean(onSubmitSkipReason);
+
+  const submitSkipReason = useCallback(() => {
+    if (!canSubmitSkipReason || !onSubmitSkipReason) return;
+    const reason = skipReason.trim();
+    setSkipReason('');
+    void flushLatest().then((saved) => {
+      if (saved) void onSubmitSkipReason(reason);
+    });
+  }, [canSubmitSkipReason, flushLatest, onSubmitSkipReason, skipReason]);
 
   return (
     <div className="scratchpad-workspace" ref={hostRef} data-theme-revision={themeRevision}>
@@ -550,7 +950,7 @@ export function ScratchpadWorkspace({
             type="button"
             className="btn btn--ghost scratchpad-toolbar__skip"
             aria-label="Skip question"
-            disabled={busy}
+            disabled={busy || asking || skipPrompt}
             onClick={() => {
               void flushLatest().then((saved) => {
                 if (saved) void onSkip();
@@ -622,21 +1022,35 @@ export function ScratchpadWorkspace({
             tool={spacePan ? 'hand' : tool}
             feedbackRegions={boundFeedbackRegions}
             exportBounds={exportBounds}
-            disabled={busy}
+            annotationHighlights={annotationHighlights}
+            disabled={busy || asking || promptMode === 'submitting'}
           />
         </Suspense>
       </div>
 
-      {history.selectedIds.length > 0 && phase === 'dialogue' && !promptOpen && (
-        <button
-          type="button"
-          className="scratchpad-selection-action"
+      {showSelectionAction && (
+        <div
+          className="scratchpad-selection-actions"
           style={selectionActionPosition}
-          disabled={busy}
-          onClick={openPrompt}
+          data-testid="scratchpad-selection-action"
         >
-          Ask or submit selection <kbd>/</kbd>
-        </button>
+          <button
+            type="button"
+            className="scratchpad-selection-action"
+            disabled={busy}
+            onClick={openAsk}
+          >
+            Ask about selection <kbd>/</kbd>
+          </button>
+          <button
+            type="button"
+            className="scratchpad-selection-action scratchpad-selection-action--submit"
+            disabled={busy}
+            onClick={openSubmit}
+          >
+            Submit as answer
+          </button>
+        </div>
       )}
 
       <ScratchpadQuestionPanel
@@ -654,15 +1068,128 @@ export function ScratchpadWorkspace({
 
       <ScratchpadPromptBar
         open={promptOpen}
-        busy={busy}
+        mode={promptMode}
+        busy={busy || asking || promptMode === 'submitting'}
         selectionCount={selectionCount}
         prompt={askPrompt}
+        previewDataUri={pendingImage}
+        errorMessage={displaySubmitError}
         position={position}
         onPromptChange={setAskPrompt}
         onAsk={() => void handleAsk()}
-        onSubmit={() => void handleSubmit()}
+        onConfirmSubmit={() => void handleSubmit()}
+        onRetrySubmit={handleRetrySubmit}
         onClose={closePrompt}
       />
+
+      {activeAsk && (
+        <ScratchpadAnnotationPanel
+          mode={activeAsk.error ? 'error' : 'loading'}
+          position={activeAsk.position}
+          prompt={activeAsk.prompt}
+          error={activeAsk.error}
+          busy={busy}
+          onRetry={() => void runAsk(activeAsk)}
+          onDismiss={() => setActiveAsk(null)}
+        />
+      )}
+
+      {gradingInFlight && gradePanelPosition && (
+        <ScratchpadAnnotationPanel
+          mode="loading"
+          kind="grade"
+          position={gradePanelPosition}
+          busy
+        />
+      )}
+
+      {showGradeReply && graded && gradePanelPosition && (
+        <ScratchpadAnnotationPanel
+          mode={gradeExpanded ? 'response' : 'marker'}
+          kind="grade"
+          position={gradePanelPosition}
+          response={graded.feedback ?? undefined}
+          verdict={graded.correct === 'yes' ? 'correct' : 'incorrect'}
+          verdictAssisted={graded.assisted === true}
+          busy={busy}
+          onExpand={() => setGradeExpanded(true)}
+          onCollapse={() => setGradeExpanded(false)}
+          onDismiss={() => setGradeExpanded(false)}
+        />
+      )}
+
+      {annotations.map((annotation) => {
+        const bounds = selectedExportBounds(history.present, annotation.node_ids, 0);
+        if (!bounds) return null;
+        const isExpanded = expandedAnnotationId === annotation.id;
+        const panelPosition = selectionAnchorPosition(
+          hostRef.current,
+          bounds,
+          camera,
+          metaOpen,
+          narrow,
+          isExpanded ? RESPONSE_PANEL_WIDTH : MARKER_WIDTH,
+          isExpanded ? RESPONSE_PANEL_HEIGHT : MARKER_HEIGHT,
+        );
+        return (
+          <ScratchpadAnnotationPanel
+            key={annotation.id}
+            mode={isExpanded ? 'response' : 'marker'}
+            position={panelPosition}
+            prompt={annotation.prompt}
+            response={annotation.response}
+            onExpand={() => {
+              setPromptOpen(false);
+              setExpandedAnnotationId(annotation.id);
+              if (annotation.feedback_regions.length > 0) {
+                setBoundFeedbackRegions(annotation.feedback_regions);
+              }
+            }}
+            onCollapse={() => setExpandedAnnotationId(null)}
+            onDismiss={() => {
+              setAnnotations((current) =>
+                current.filter((item) => item.id !== annotation.id),
+              );
+              setExpandedAnnotationId((current) =>
+                current === annotation.id ? null : current,
+              );
+            }}
+          />
+        );
+      })}
+
+      {showSkipPrompt && (
+        <div className="scratchpad-tutor-overlay" aria-live="polite">
+          <div className="scratchpad-tutor-strip__skip">
+            <p className="signal-capture__rating-prompt">Why skip?</p>
+            <div className="scratchpad-skip-reason">
+              <input
+                type="text"
+                className="scratchpad-skip-reason__input"
+                value={skipReason}
+                placeholder="Briefly, why do you want to skip this question?"
+                aria-label="Skip reason"
+                disabled={busy}
+                onChange={(event) => setSkipReason(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submitSkipReason();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn--primary scratchpad-skip-reason__submit"
+                disabled={!canSubmitSkipReason}
+                onClick={submitSkipReason}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showOutcome && (
         <div className="scratchpad-tutor-overlay" aria-live="polite">

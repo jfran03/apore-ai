@@ -27,8 +27,8 @@ function bank(): QuestionBankResponse {
     version: 1,
     path: 'question-bank.json',
     questions: [
-      { id: 'beta-1', concept_id: 'beta', type: 'recall', intended_difficulty: 0.25, text: 'q' },
-      { id: 'alpha-1', concept_id: 'alpha', type: 'recall', intended_difficulty: 0.25, text: 'q' },
+      { id: 'beta-1', concept_id: 'beta', type: 'recall', intended_difficulty: 0.25, text: 'q', scratchpad_eligible: false },
+      { id: 'alpha-1', concept_id: 'alpha', type: 'recall', intended_difficulty: 0.25, text: 'q', scratchpad_eligible: true },
     ],
   };
 }
